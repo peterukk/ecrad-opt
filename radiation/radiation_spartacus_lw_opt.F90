@@ -347,43 +347,6 @@ contains
         write(nulout,'(a)',advance='no') '.'
       end if
 
-      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix
-      call calc_overlap_matrices_nocol(nlev,nreg, &
-      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
-      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
-      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
-      &  use_beta_overlap=config%use_beta_overlap, &
-      &  cloud_cover=flux%cloud_cover_lw(jcol))
-
-      ! ! total_albedo(:,:,:,:) = 0.0_jprb
-      ! ! total_source(:,:,:) = 0.0_jprb
-      ! total_albedo(:,:,:,nlev+1) = 0.0_jprb
-
-      ! if (config%do_clear) then
-      !   total_albedo_clear(:,:) = 0.0_jprb
-      !   total_source_clear(:,:) = 0.0_jprb
-      ! end if
-
-      ! ! Calculate the upwelling radiation emitted by the surface, and
-      ! ! copy the surface albedo into total_albedo 
-      ! do jreg = 1,nreg
-      !   do jg = 1,ng
-      !     ! region_fracs(jreg,nlev,jcol) is the fraction of each
-      !     ! region in the lowest model level
-      !     total_source(jg,jreg,nlev+1) = region_fracs(jreg,nlev,jcol)*emission(jg,jcol)
-      !     total_albedo(jg,jreg,jreg,nlev+1) = albedo(jg,jcol)
-      !   end do
-      ! end do
-      ! ! Equivalent surface values for computing clear-sky fluxes 
-      ! if (config%do_clear) then
-      !   do jg = 1,ng
-      !     total_source_clear(jg,nlev+1) = emission(jg,jcol)
-      !   end do
-      !   ! In the case of surface albedo there is no dependence on
-      !   ! cloud fraction so we can copy the all-sky value
-      !   total_albedo_clear(1:ng,nlev+1) = total_albedo(1:ng,1,1,nlev+1)
-      ! end if
-
       ! Define which layers contain cloud; assume that
       ! cloud%crop_cloud_fraction has already been called
       is_clear_sky_layer = .true.
@@ -463,6 +426,15 @@ contains
         end if
         
       end do ! jlev
+
+
+      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix
+      call calc_overlap_matrices_nocol(nlev,nreg, is_clear_sky_layer, &
+      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
+      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
+      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
+      &  use_beta_overlap=config%use_beta_overlap, &
+      &  cloud_cover=flux%cloud_cover_lw(jcol))
 
       ! --------------------------------------------------------
       ! Section 3
@@ -1305,16 +1277,23 @@ contains
         end if
 
         ! Store the broadband fluxes
+        sums_up = 0.0_jprb; sums_dn = 0.0_jprb
         if (is_clear_sky_layer(jlev)) then
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_above(jg,1) 
             sums_dn = sums_dn + flux_dn_above(jg,1)
           end do
         else 
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_above(jg,1) + flux_up_above(jg,2) + flux_up_above(jg,3)
             sums_dn = sums_dn + flux_dn_above(jg,1) + flux_dn_above(jg,2) + flux_dn_above(jg,3)
@@ -1325,7 +1304,11 @@ contains
 
         if (config%do_clear) then
           sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_clear(jg)
             sums_dn = sums_dn + flux_dn_clear(jg)

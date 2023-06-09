@@ -165,11 +165,11 @@ contains
     ! interface with respect to downwelling diffuse radiation at that
     ! interface, where level index = 1 corresponds to the
     ! top-of-atmosphere
-    real(jprb), dimension(:,:,:), allocatable :: total_albedo 
+    real(jprb), dimension(ng,nregions,nlev+1) :: total_albedo 
     ! Upwelling radiation just above a layer interface due to emission
     ! below that interface, where level index = 1 corresponds to the
     ! top-of-atmosphere
-    real(jprb), dimension(:,:,:), allocatable :: total_source
+    real(jprb), dimension(ng,nregions,nlev+1) :: total_source
     ! Total albedo and source of the atmosphere just below a layer interface
     real(jprb), dimension(ng, nregions) &
          &  :: total_albedo_below, total_source_below
@@ -220,14 +220,6 @@ contains
     ! Main loop over columns
     do jcol = istartcol, iendcol
 
-      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix 
-      call calc_overlap_matrices_nocol(nlev,nregions, &
-      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
-      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
-      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
-      &  use_beta_overlap=config%use_beta_overlap, &
-      &  cloud_cover=flux%cloud_cover_lw(jcol))
-
       ! --------------------------------------------------------
       ! Section 2: Prepare column-specific variables and arrays
       ! --------------------------------------------------------
@@ -250,6 +242,14 @@ contains
         ! consider scattering
         i_cloud_top = 1
       end if
+
+      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix 
+      call calc_overlap_matrices_nocol(nlev,nregions, is_clear_sky_layer,&
+      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
+      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
+      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
+      &  use_beta_overlap=config%use_beta_overlap, &
+      &  cloud_cover=flux%cloud_cover_lw(jcol))
 
       ! --------------------------------------------------------
       ! Section 3: Clear-sky calculation
@@ -312,7 +312,11 @@ contains
         ! Sum over g-points to compute broadband fluxes
         do jlev = 1,nlev+1
           sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_clear(jg,jlev)
             sums_dn = sums_dn + flux_dn_clear(jg,jlev)
@@ -472,8 +476,7 @@ contains
 #ifdef USE_TIMING
      ret =  gptlstart('section_5-7_lw')
 #endif 
-      allocate(total_albedo(ng,nregions,i_cloud_top:nlev+1), total_source(ng,nregions,i_cloud_top:nlev+1))
-      total_albedo = 0.0_jprb
+      total_albedo(:,:,i_cloud_top:nlev+1) = 0.0_jprb
 
       ! Calculate the upwelling radiation emitted by the surface, and
       ! copy the surface albedo into total_albedo 
@@ -562,7 +565,11 @@ contains
       do jlev = i_cloud_top,1,-1
         if (jlev /= i_cloud_top) then
           sums_up = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up)
+#endif
           do jg = 1, ng
             flux_up(jg,1) = trans_clear(jg,jlev)*flux_up(jg,1) + source_up_clear(jg,jlev)
             sums_up       = sums_up + flux_up(jg,1)
@@ -666,36 +673,31 @@ contains
                ! nothing to do
 
         ! Store the broadband fluxes
-        if (nregions==3) then ! faster code
-          if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
-            sums_up = 0.0_jprb; sums_dn = 0.0_jprb
-            !$omp simd reduction(+:sums_up, sums_dn)
-            do jg = 1, ng  
-              sums_up = sums_up + flux_up(jg,1)
-              sums_dn = sums_dn + flux_dn(jg,1)
-            end do
-            flux%lw_up(jcol,jlev+1) = sums_up
-            flux%lw_dn(jcol,jlev+1) = sums_dn
-          else
-            sums_up = 0.0_jprb; sums_dn = 0.0_jprb
-            !$omp simd reduction(+:sums_up, sums_dn)
-            do jg = 1, ng  
-              sums_up = sums_up + flux_up(jg,1) + flux_up(jg,2) + flux_up(jg,3)
-              sums_dn = sums_dn + flux_dn(jg,1) + flux_dn(jg,2) + flux_dn(jg,3)
-            end do
-            flux%lw_up(jcol,jlev+1) = sums_up
-            flux%lw_dn(jcol,jlev+1) = sums_dn
-          end if
-        else 
-          if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
-            flux%lw_up(jcol,jlev+1) = sum(flux_up(:,1))
-            flux%lw_dn(jcol,jlev+1) = sum(flux_dn(:,1))
-          else
-            flux%lw_up(jcol,jlev+1) = sum(sum(flux_up,1))
-            flux%lw_dn(jcol,jlev+1) = sum(sum(flux_dn,1))
-          end if 
+        sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+        if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
+          !$omp simd reduction(+:sums_up, sums_dn)
+#endif
+          do jg = 1, ng  
+            sums_up = sums_up + flux_up(jg,1)
+            sums_dn = sums_dn + flux_dn(jg,1)
+          end do
+        else
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
+          !$omp simd reduction(+:sums_up, sums_dn)
+#endif
+          do jg = 1, ng  
+            sums_up = sums_up + flux_up(jg,1) + flux_up(jg,2) + flux_up(jg,3)
+            sums_dn = sums_dn + flux_dn(jg,1) + flux_dn(jg,2) + flux_dn(jg,3)
+          end do
         end if
-        
+        flux%lw_up(jcol,jlev+1) = sums_up
+        flux%lw_dn(jcol,jlev+1) = sums_dn
+
         ! Save the spectral fluxes if required
         if (config%do_save_spectral_flux) then
           call indexed_sum(sum(flux_up,2), &
@@ -727,7 +729,6 @@ contains
      ret =  gptlstop('section_8_lw_derivatives')
 #endif 
       end if
-      deallocate(total_albedo, total_source)
 #ifdef USE_TIMING
      ret =  gptlstop('section_8_lw')
 #endif 

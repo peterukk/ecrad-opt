@@ -236,22 +236,33 @@ contains
   !---------------------------------------------------------------------
   ! Add the optical properties of a particular cloud type to the
   ! accumulated optical properties of all cloud types
-  subroutine add_optical_properties(this, ng, nlev, ncol, &
+  subroutine add_optical_properties(this, ng_in, nlev, ncol, skip_add, &
        &                            cloud_fraction, &
        &                            water_path, effective_radius, &
        &                            od, scat_od, scat_asymmetry)
-
     use yomhook, only : lhook, dr_hook, jphook
-
     class(general_cloud_optics_type), intent(in) :: this
-
+    ! Allow size of inner dimension (number of g-points) to be known at compile time 
+    ! Since this kernel is used for both SW and LW we also got to make sure ng_sw = ng_lw
+#if defined NG_SW && defined NG_LW && NG_SW==NG_LW 
+    integer, parameter :: ng = NG_SW
+#else
+#define ng ng_in
+#endif
     ! Number of g points, levels and columns
-    integer, intent(in) :: ng, nlev, ncol
+    integer, intent(in) :: ng_in, nlev, ncol
 
     ! Properties of present cloud type, dimensioned (ncol,nlev)
+#ifdef OPTIM_CODE 
+    real(jprb), intent(in) :: cloud_fraction(ncol,nlev)
+    real(jprb), intent(in) :: water_path(ncol,nlev)       ! kg m-2
+    real(jprb), intent(in) :: effective_radius(ncol,nlev) ! m
+#else
     real(jprb), intent(in) :: cloud_fraction(:,:)
     real(jprb), intent(in) :: water_path(:,:)       ! kg m-2
     real(jprb), intent(in) :: effective_radius(:,:) ! m
+#endif
+    logical, intent(in) :: skip_add
 
     ! Optical properties which are additive per cloud type,
     ! dimensioned (ng,nlev,ncol)
@@ -260,59 +271,102 @@ contains
     real(jprb), intent(inout), dimension(ng,nlev,ncol), optional &
          &  :: scat_od, &     ! Scattering optical depth of layer
          &     scat_asymmetry ! Scattering optical depth x asymmetry factor
-
     real(jprb) :: od_local
 
     real(jprb) :: re_index, weight1, weight2
     integer :: ire
 
-    integer :: jcol, jlev, jg
+    integer :: jcol, jlev, jg, ret
 
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_general_cloud_optics_data:add_optical_properties',0,hook_handle)
 
-    if (present(scat_od)) then
-      do jcol = 1,ncol
-        do jlev = 1,nlev
-          if (cloud_fraction(jcol, jlev) > 0.0_jprb) then
-            re_index = max(1.0_jprb, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
-                 &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
-            ire = int(re_index)
-            weight2 = re_index - ire
-            weight1 = 1.0_jprb - weight2
-            do jg = 1, ng
-              od_local = water_path(jcol, jlev) * (weight1*this%mass_ext(jg,ire) &
-                 &                                +weight2*this%mass_ext(jg,ire+1))
-              od(jg,jlev,jcol) = od(jg,jlev,jcol) + od_local
-              od_local = od_local * (weight1*this%ssa(jg,ire) &
-                 &                  +weight2*this%ssa(jg,ire+1))
-              scat_od(jg,jlev,jcol) = scat_od(jg,jlev,jcol) + od_local
-              scat_asymmetry(jg,jlev,jcol) = scat_asymmetry(jg,jlev,jcol) &
-                 & + od_local * (weight1*this%asymmetry(jg,ire) &
-                 &              +weight2*this%asymmetry(jg,ire+1))
-            end do
-          end if
+    if (skip_add) then 
+      ! Write to the inout arrays directly instead of adding to them
+      if (present(scat_od)) then
+        do jcol = 1,ncol
+          do jlev = 1,nlev
+            if (cloud_fraction(jcol, jlev) > 0.0_jprb) then
+              re_index = max(1.0_jprb, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
+                  &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
+              ire = int(re_index)
+              weight2 = re_index - ire
+              weight1 = 1.0_jprb - weight2
+              do jg = 1, ng
+                od_local = water_path(jcol, jlev) * (weight1*this%mass_ext(jg,ire) &
+                  &                                +weight2*this%mass_ext(jg,ire+1))
+                od(jg,jlev,jcol) = od_local
+                od_local = od_local * (weight1*this%ssa(jg,ire) &
+                  &                  +weight2*this%ssa(jg,ire+1))
+                scat_od(jg,jlev,jcol) = od_local
+                scat_asymmetry(jg,jlev,jcol) = od_local * (weight1*this%asymmetry(jg,ire) &
+                  &              +weight2*this%asymmetry(jg,ire+1))
+              end do
+            end if
+          end do
         end do
-      end do
-    else
-      ! No scattering: return the absorption optical depth
-      do jcol = 1,ncol
-        do jlev = 1,nlev
-          if (water_path(jcol, jlev) > 0.0_jprb) then
-            re_index = max(1.0, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
-                 &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
-            ire = int(re_index)
-            weight2 = re_index - ire
-            weight1 = 1.0_jprb - weight2
-            od(:,jlev,jcol) = od(:,jlev,jcol) &
-                 &  + water_path(jcol, jlev) * (weight1*this%mass_ext(:,ire) &
-                 &                             +weight2*this%mass_ext(:,ire+1)) &
-                 &  * (1.0_jprb - (weight1*this%ssa(:,ire)+weight2*this%ssa(:,ire+1)))
-          end if
+      else
+        ! No scattering: return the absorption optical depth
+        do jcol = 1,ncol
+          do jlev = 1,nlev
+            if (water_path(jcol, jlev) > 0.0_jprb) then
+              re_index = max(1.0, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
+                  &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
+              ire = int(re_index)
+              weight2 = re_index - ire
+              weight1 = 1.0_jprb - weight2
+              od(:,jlev,jcol) = water_path(jcol, jlev) * (weight1*this%mass_ext(:,ire) &
+                  &                             +weight2*this%mass_ext(:,ire+1)) &
+                  &  * (1.0_jprb - (weight1*this%ssa(:,ire)+weight2*this%ssa(:,ire+1)))
+            end if
+          end do
         end do
-      end do
-    end if
+      end if
+    else 
+      ! Add to existing optical properties
+      if (present(scat_od)) then
+        do jcol = 1,ncol
+          do jlev = 1,nlev
+            if (cloud_fraction(jcol, jlev) > 0.0_jprb) then
+              re_index = max(1.0_jprb, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
+                  &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
+              ire = int(re_index)
+              weight2 = re_index - ire
+              weight1 = 1.0_jprb - weight2
+              do jg = 1, ng
+                od_local = water_path(jcol, jlev) * (weight1*this%mass_ext(jg,ire) &
+                  &                                +weight2*this%mass_ext(jg,ire+1))
+                od(jg,jlev,jcol) = od(jg,jlev,jcol) + od_local
+                od_local = od_local * (weight1*this%ssa(jg,ire) &
+                  &                  +weight2*this%ssa(jg,ire+1))
+                scat_od(jg,jlev,jcol) = scat_od(jg,jlev,jcol) + od_local
+                scat_asymmetry(jg,jlev,jcol) = scat_asymmetry(jg,jlev,jcol) &
+                  & + od_local * (weight1*this%asymmetry(jg,ire) &
+                  &              +weight2*this%asymmetry(jg,ire+1))
+              end do
+            end if
+          end do
+        end do
+      else
+        ! No scattering: return the absorption optical depth
+        do jcol = 1,ncol
+          do jlev = 1,nlev
+            if (water_path(jcol, jlev) > 0.0_jprb) then
+              re_index = max(1.0, min(1.0_jprb + (effective_radius(jcol,jlev)-this%effective_radius_0) &
+                  &              / this%d_effective_radius, this%n_effective_radius-0.0001_jprb))
+              ire = int(re_index)
+              weight2 = re_index - ire
+              weight1 = 1.0_jprb - weight2
+              od(:,jlev,jcol) = od(:,jlev,jcol) &
+                  &  + water_path(jcol, jlev) * (weight1*this%mass_ext(:,ire) &
+                  &                             +weight2*this%mass_ext(:,ire+1)) &
+                  &  * (1.0_jprb - (weight1*this%ssa(:,ire)+weight2*this%ssa(:,ire+1)))
+            end if
+          end do
+        end do
+      end if
+    end if 
 
     if (lhook) call dr_hook('radiation_general_cloud_optics_data:add_optical_properties',1,hook_handle)
 

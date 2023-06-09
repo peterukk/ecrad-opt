@@ -371,18 +371,6 @@ contains
     ! Main loop over columns
     do jcol = istartcol, iendcol
 
-      ! call calc_overlap_matrices_nocol(nlev,nreg, &
-      ! &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
-      ! &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
-      ! &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
-      ! &  use_beta_overlap=config%use_beta_overlap, &
-      ! &  cloud_cover=flux%cloud_cover_sw(jcol))
-      call calc_overlap_matrices_nocol_dp(nlev,nreg, &
-      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
-      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
-      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
-      &  use_beta_overlap=config%use_beta_overlap, &
-      &  cloud_cover=flux%cloud_cover_sw(jcol))
       ! --------------------------------------------------------
       ! Section 2: Prepare column-specific variables and arrays
       ! --------------------------------------------------------
@@ -463,7 +451,6 @@ contains
           i_cloud_top = jlev
         end if
 
-
         layer_depth(jlev) = R_over_g &
              &  * (thermodynamics%pressure_hl(jcol,jlev+1) &
              &     - thermodynamics%pressure_hl(jcol,jlev)) &
@@ -533,6 +520,19 @@ contains
         
       end do ! jlev
  
+      ! call calc_overlap_matrices_nocol(nlev,nreg,is_clear_sky_layer, &
+      ! &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
+      ! &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
+      ! &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
+      ! &  use_beta_overlap=config%use_beta_overlap, &
+      ! &  cloud_cover=flux%cloud_cover_sw(jcol))
+      call calc_overlap_matrices_nocol_dp(nlev, nreg, is_clear_sky_layer, &
+      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
+      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
+      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
+      &  use_beta_overlap=config%use_beta_overlap, &
+      &  cloud_cover=flux%cloud_cover_sw(jcol))
+
       ! Horizontal migration distances of reflected radiation at the
       ! surface are zero
       x_diffuse = 0.0_jprb
@@ -1581,17 +1581,24 @@ end if
         end if
 
         ! Compute and store the broadband fluxes
+        sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
         if (is_clear_sky_layer(jlev)) then 
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_above(jg,1) 
             sums_dn = sums_dn + flux_dn_above(jg,1) 
             sums_dn_dir = sums_dn_dir + direct_dn_above(jg,1)
           end do
         else
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
+#endif
           do jg = 1, ng  
             sums_up = sums_up + flux_up_above(jg,1) + flux_up_above(jg,2) + flux_up_above(jg,3)
             sums_dn = sums_dn + flux_dn_above(jg,1) + flux_dn_above(jg,2) + flux_dn_above(jg,3)
@@ -1603,7 +1610,11 @@ end if
         if (allocated(flux%sw_dn_direct)) flux%sw_dn_direct(jcol,jlev+1) = mu0*sums_dn_dir
         if (config%do_clear) then
           sums_up_clear = 0.0_jprb; sums_dn_clear = 0.0_jprb; sums_dn_dir_clear = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
           !$omp simd reduction(+:sums_up_clear, sums_dn_clear, sums_dn_dir_clear)
+#endif
           do jg = 1, ng  
             sums_up_clear = sums_up_clear + flux_up_clear(jg)
             sums_dn_clear = sums_dn_clear + flux_dn_clear(jg)

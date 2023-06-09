@@ -215,11 +215,21 @@ integer, parameter :: ng = NG_SW
 
     ! Main loop over columns
     do jcol = istartcol, iendcol
+
+      ! Define which layers contain cloud; assume that
+      ! cloud%crop_cloud_fraction has already been called
+      is_clear_sky_layer = .true.
+      do jlev = 1,nlev
+        if (cloud%fraction(jcol,jlev) > 0.0_jprb) then
+          is_clear_sky_layer(jlev) = .false.
+        end if
+      end do
+
       ! Compute wavelength-independent overlap matrix v_matrix
 #ifdef USE_TIMING
     ret =  gptlstart('overlap_matrices')
 #endif 
-      call calc_overlap_matrices_nocol(nlev,nregions, &
+      call calc_overlap_matrices_nocol(nlev,nregions, is_clear_sky_layer, &
       &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
       &  v_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
       &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
@@ -277,14 +287,14 @@ integer, parameter :: ng = NG_SW
 
       ! At this point mu0 >= 1.0e-10
 
-      ! Define which layers contain cloud; assume that
-      ! cloud%crop_cloud_fraction has already been called
-      is_clear_sky_layer = .true.
-      do jlev = 1,nlev
-        if (cloud%fraction(jcol,jlev) > 0.0_jprb) then
-          is_clear_sky_layer(jlev) = .false.
-        end if
-      end do
+      ! ! Define which layers contain cloud; assume that
+      ! ! cloud%crop_cloud_fraction has already been called
+      ! is_clear_sky_layer = .true.
+      ! do jlev = 1,nlev
+      !   if (cloud%fraction(jcol,jlev) > 0.0_jprb) then
+      !     is_clear_sky_layer(jlev) = .false.
+      !   end if
+      ! end do
 
       ! --------------------------------------------------------
       ! Section 3: Loop over layers to compute reflectance and transmittance
@@ -653,16 +663,7 @@ integer, parameter :: ng = NG_SW
                &  +        flux_dn(jg,1)*total_albedo(jg,1,jlev+1)
         end do
         ! Fluxes for cloudy regions, if they exist
-        if (is_clear_sky_layer(jlev)) then
-          ! The following zero initialization is actually slow (4% of runtime with ECCKD), and only strictly speaking necessary
-          ! if either the current and above layer aren't clear-sky (conditional below), because 
-          ! we can avoid simply adding zeroes in the broadband reduction later
-          if (nregions/=3) then
-            flux_dn(:,2:)  = 0.0_jprb
-            flux_up(:,2:)  = 0.0_jprb
-            direct_dn(:,2:)= 0.0_jprb
-          end if
-        else
+        if (.not. is_clear_sky_layer(jlev)) then
           flux_dn(:,2:) = (transmittance(:,2:,jlev)*flux_dn(:,2:) + direct_dn(:,2:) &
                &  * (trans_dir_dir(:,2:,jlev)*total_albedo_direct(:,2:,jlev+1)*reflectance(:,2:,jlev) &
                &     + trans_dir_diff(:,2:,jlev) )) &
@@ -674,7 +675,9 @@ integer, parameter :: ng = NG_SW
 
         if (.not. (is_clear_sky_layer(jlev) &
              &    .and. is_clear_sky_layer(jlev+1))) then
-          ! Moved from above
+          ! Moved from above:
+          ! The zero initialization is quite slow and onl necessary if either the current and above layer 
+          ! aren't clear-sky because we can simply avoid adding zeroes in the broadband reduction
           if (is_clear_sky_layer(jlev)) then
             flux_dn(:,2:)  = 0.0_jprb
             flux_up(:,2:)  = 0.0_jprb
@@ -682,76 +685,60 @@ integer, parameter :: ng = NG_SW
           end if 
           ! Account for overlap rules in translating fluxes just above
           ! a layer interface to the values just below
-          if (nregions==3) then ! faster code
-            flux_dn = singlemat_x_vec_sw(ng, &
-                &  v_matrix(:,:,jlev+1), flux_dn)
-            direct_dn = singlemat_x_vec_sw(ng, &
-                &  v_matrix(:,:,jlev+1), direct_dn)
-          else
-            flux_dn = singlemat_x_vec(ng,ng,nregions, &
-                &  v_matrix(:,:,jlev+1), flux_dn)
-            direct_dn = singlemat_x_vec(ng,ng,nregions, &
-                &  v_matrix(:,:,jlev+1), direct_dn)
-          end if 
+          flux_dn = singlemat_x_vec_sw(ng, &
+              &  v_matrix(:,:,jlev+1), flux_dn)
+          direct_dn = singlemat_x_vec_sw(ng, &
+              &  v_matrix(:,:,jlev+1), direct_dn)
         end if ! Otherwise the fluxes in each region are the same so nothing to do
 
         ! Compute and store the broadband fluxes
-        if (nregions==3) then ! faster code
-          if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
-            sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
-            !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
-            do jg = 1, ng  
-              sums_up = sums_up + flux_up(jg,1) 
-              sums_dn = sums_dn + flux_dn(jg,1) 
-              sums_dn_dir = sums_dn_dir + direct_dn(jg,1)
-            end do
-          else
-            sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
-            !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
-            do jg = 1, ng  
-              sums_up = sums_up + flux_up(jg,1) + flux_up(jg,2) + flux_up(jg,3)
-              sums_dn = sums_dn + flux_dn(jg,1) + flux_dn(jg,2) + flux_dn(jg,3)
-              sums_dn_dir = sums_dn_dir + direct_dn(jg,1) + direct_dn(jg,2) + direct_dn(jg,3)
-            end do
-          end if
-          flux%sw_up(jcol,jlev+1) = sums_up 
-          flux%sw_dn(jcol,jlev+1) = mu0*sums_dn_dir + sums_dn
-          if (allocated(flux%sw_dn_direct)) flux%sw_dn_direct(jcol,jlev+1) = mu0*sums_dn_dir
-          if (config%do_clear) then
-            sums_up_clear = 0.0_jprb; sums_dn_clear = 0.0_jprb; sums_dn_dir_clear = 0.0_jprb
-            !$omp simd reduction(+:sums_up_clear, sums_dn_clear, sums_dn_dir_clear)
-            do jg = 1, ng  
-              sums_up_clear = sums_up_clear + flux_up_clear(jg)
-              sums_dn_clear = sums_dn_clear + flux_dn_clear(jg)
-              sums_dn_dir_clear = sums_dn_dir_clear + direct_dn_clear(jg)
-            end do
-            flux%sw_up_clear(jcol,jlev+1) = sums_up_clear 
-            flux%sw_dn_clear(jcol,jlev+1) = mu0*sums_dn_dir_clear + sums_dn_clear
-            if (allocated(flux%sw_dn_direct_clear)) then
-              flux%sw_dn_direct_clear(jcol,jlev+1) =  mu0*sums_dn_dir_clear
-            end if
-          end if
+        if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
+          sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
+          !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
+#endif
+          do jg = 1, ng  
+            sums_up = sums_up + flux_up(jg,1) 
+            sums_dn = sums_dn + flux_dn(jg,1) 
+            sums_dn_dir = sums_dn_dir + direct_dn(jg,1)
+          end do
         else
-          flux%sw_up(jcol,jlev+1) = sum(sum(flux_up,1))
-          if (allocated(flux%sw_dn_direct)) then
-            flux%sw_dn_direct(jcol,jlev+1) = mu0 * sum(sum(direct_dn,1))
-            flux%sw_dn(jcol,jlev+1) &
-                &  = flux%sw_dn_direct(jcol,jlev+1) + sum(sum(flux_dn,1))
-          else
-            flux%sw_dn(jcol,jlev+1) = mu0 * sum(sum(direct_dn,1)) + sum(sum(flux_dn,1))   
-          end if
-          if (config%do_clear) then
-            flux%sw_up_clear(jcol,jlev+1) = sum(flux_up_clear)
-            if (allocated(flux%sw_dn_direct_clear)) then
-              flux%sw_dn_direct_clear(jcol,jlev+1) = mu0 * sum(direct_dn_clear)
-              flux%sw_dn_clear(jcol,jlev+1) &
-                  &  = flux%sw_dn_direct_clear(jcol,jlev+1) + sum(flux_dn_clear)
-            else
-              flux%sw_dn_clear(jcol,jlev+1) = mu0 * sum(direct_dn_clear) &
-                  &  + sum(flux_dn_clear)
-            end if
+          sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
+          !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
+#endif
+          do jg = 1, ng  
+            sums_up = sums_up + flux_up(jg,1) + flux_up(jg,2) + flux_up(jg,3)
+            sums_dn = sums_dn + flux_dn(jg,1) + flux_dn(jg,2) + flux_dn(jg,3)
+            sums_dn_dir = sums_dn_dir + direct_dn(jg,1) + direct_dn(jg,2) + direct_dn(jg,3)
+          end do
+        end if
+        flux%sw_up(jcol,jlev+1) = sums_up 
+        flux%sw_dn(jcol,jlev+1) = mu0*sums_dn_dir + sums_dn
+        if (allocated(flux%sw_dn_direct)) flux%sw_dn_direct(jcol,jlev+1) = mu0*sums_dn_dir
+        if (config%do_clear) then
+          sums_up_clear = 0.0_jprb; sums_dn_clear = 0.0_jprb; sums_dn_dir_clear = 0.0_jprb
+#ifdef __NEC__
+          !NEC$ shortloop
+#else
+          !$omp simd reduction(+:sums_up_clear, sums_dn_clear, sums_dn_dir_clear)
+#endif
+          do jg = 1, ng  
+            sums_up_clear = sums_up_clear + flux_up_clear(jg)
+            sums_dn_clear = sums_dn_clear + flux_dn_clear(jg)
+            sums_dn_dir_clear = sums_dn_dir_clear + direct_dn_clear(jg)
+          end do
+          flux%sw_up_clear(jcol,jlev+1) = sums_up_clear 
+          flux%sw_dn_clear(jcol,jlev+1) = mu0*sums_dn_dir_clear + sums_dn_clear
+          if (allocated(flux%sw_dn_direct_clear)) then
+            flux%sw_dn_direct_clear(jcol,jlev+1) =  mu0*sums_dn_dir_clear
           end if
         end if
+       
         ! Save the spectral fluxes if required
         if (config%do_save_spectral_flux) then
           call indexed_sum(sum(flux_up,2), &
