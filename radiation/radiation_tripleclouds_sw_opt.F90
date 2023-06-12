@@ -226,18 +226,13 @@ integer, parameter :: ng = NG_SW
       end do
 
       ! Compute wavelength-independent overlap matrix v_matrix
-#ifdef USE_TIMING
-    ret =  gptlstart('overlap_matrices')
-#endif 
       call calc_overlap_matrices_nocol(nlev,nregions, is_clear_sky_layer, &
       &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
       &  v_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
       &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
       &  use_beta_overlap=config%use_beta_overlap, &
       &  cloud_cover=flux%cloud_cover_sw(jcol))
-#ifdef USE_TIMING
-    ret =  gptlstop('overlap_matrices')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 2: Prepare column-specific variables and arrays
       ! --------------------------------------------------------

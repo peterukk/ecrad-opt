@@ -989,7 +989,7 @@ contains
                   od_lw_aerosol(jband,jlev) = od_lw_aerosol(jband,jlev) &
                        &  + factor(jlev) * mixing_ratio &
                        &  * ao%mass_ext_lw_phobic(jband,itype) &
-                       &  * (1.0_jprb - ao%ssa_lw_phobic(jband,itype))
+                       &  * one_minus_ao_ssa_lw_phobic(jband,itype)
                 end do
               end if
             end do

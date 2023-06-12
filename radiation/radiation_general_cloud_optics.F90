@@ -168,8 +168,6 @@ contains
 
     integer :: jtype, jcol, jlev, jg
 
-    logical :: skip_add
-
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_general_cloud_optics:general_cloud_optics',0,hook_handle)
@@ -178,11 +176,7 @@ contains
       write(nulout,'(a)') 'Computing cloud absorption/scattering properties'
     end if
 
-#ifndef OPTIM_CODE
     ! Array-wise assignment
-    ! An optimization that can almost halve the runtime of cloud optics is to write to these
-    ! arrays when add_optical_properties is called for the first time, instead of adding to them,
-    ! as this also allows skipping the initialization
     od_lw_cloud  = 0.0_jprb
     od_sw_cloud  = 0.0_jprb
     ssa_sw_cloud = 0.0_jprb
@@ -191,16 +185,9 @@ contains
       ssa_lw_cloud = 0.0_jprb
       g_lw_cloud   = 0.0_jprb
     end if
-#endif
 
     ! Loop over cloud types
     do jtype = 1,config%n_cloud_types
-
-#ifdef OPTIM_CODE
-      skip_add = jtype==1
-#else 
-      skip_add = .false. 
-#endif 
 
       ! Compute in-cloud water path
       if (config%is_homogeneous) then
@@ -225,12 +212,12 @@ contains
         ! coefficient x asymmetry factor, then scale after
         if (config%do_lw_cloud_scattering) then
           call config%cloud_optics_lw(jtype)%add_optical_properties(config%n_bands_lw, nlev, &
-               &  iendcol+1-istartcol, skip_add, cloud%fraction(istartcol:iendcol,:), &
+               &  iendcol+1-istartcol, cloud%fraction(istartcol:iendcol,:), &
                &  water_path, cloud%effective_radius(istartcol:iendcol,:,jtype), &
                &  od_lw_cloud, ssa_lw_cloud, g_lw_cloud)
         else
           call config%cloud_optics_lw(jtype)%add_optical_properties(config%n_bands_lw, nlev, &
-               &  iendcol+1-istartcol, skip_add, cloud%fraction(istartcol:iendcol,:), &
+               &  iendcol+1-istartcol, cloud%fraction(istartcol:iendcol,:), &
                &  water_path, cloud%effective_radius(istartcol:iendcol,:,jtype), od_lw_cloud)
         end if
       end if
@@ -240,7 +227,7 @@ contains
         ! containers for scattering optical depth and scattering
         ! coefficient x asymmetry factor, then scale after
         call config%cloud_optics_sw(jtype)%add_optical_properties(config%n_bands_sw, nlev, &
-             &  iendcol+1-istartcol, skip_add, cloud%fraction(istartcol:iendcol,:), &
+             &  iendcol+1-istartcol, cloud%fraction(istartcol:iendcol,:), &
              &  water_path, cloud%effective_radius(istartcol:iendcol,:,jtype), &
              &  od_sw_cloud, ssa_sw_cloud, g_sw_cloud)
       end if
