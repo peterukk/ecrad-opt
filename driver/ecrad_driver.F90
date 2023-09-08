@@ -49,6 +49,7 @@ program ecrad_driver
   use radiation_flux,           only : flux_type
   use radiation_save,           only : save_fluxes, save_net_fluxes, &
        &                               save_inputs, save_sw_diagnostics
+  use radiation_general_cloud_optics, only : save_general_cloud_optics
   use ecrad_driver_config,      only : driver_config_type
   use ecrad_driver_read_input,  only : read_input 
   use ecrad_driver_read_input_blocked,  only : read_input_blocked, unblock_fluxes
@@ -271,6 +272,9 @@ ret = GPTLsetoption (GPTL_L3MRT, 1);
     call config%aerosol_optics%save('aerosol_optics.nc', iverbose=driver_config%iverbose)
   end if
 
+  if (driver_config%do_save_cloud_optics .and. config%use_general_cloud_optics) then
+    call save_general_cloud_optics(config, 'hydrometeor_optics', iverbose=driver_config%iverbose)
+  end if
 
   ! Compute seed from skin temperature residual
   ! if (driver_config%block_derived_types) then 

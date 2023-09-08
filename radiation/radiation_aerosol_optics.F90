@@ -126,9 +126,6 @@ contains
     ! the file, and spectral intervals used by the gas-optics scheme
     real(jprb), allocatable :: mapping(:,:)
 
-    ! Pointer to the aerosol optics coefficients for brevity of access
-    type(aerosol_optics_type), pointer :: ao
-
     ! Target monochromatic wavenumber for interpolation (cm-1)
     real(jprb) :: wavenumber_target
 
@@ -149,184 +146,186 @@ contains
 
     if (lhook) call dr_hook('radiation_aerosol_optics:setup_general_aerosol_optics',0,hook_handle)
 
-    ao => config%aerosol_optics
+    associate(ao => config%aerosol_optics)
 
-    call file%open(trim(config%aerosol_optics_file_name), iverbose=config%iverbosesetup)
+      call file%open(trim(config%aerosol_optics_file_name), iverbose=config%iverbosesetup)
 
-    if (.not. file%exists('wavenumber')) then
-      ! Assume we have an old-style aerosol optics file with optical
-      ! properties provided per pre-defined band
+      if (.not. file%exists('wavenumber')) then
+        ! Assume we have an old-style aerosol optics file with optical
+        ! properties provided per pre-defined band
+        call file%close()
+        if (config%iverbosesetup >= 2) then
+          write(nulout,'(a)') 'Legacy aerosol optics file: mapping between bands'
+        end if
+        call setup_general_aerosol_optics_legacy(config, trim(config%aerosol_optics_file_name))
+        if (lhook) call dr_hook('radiation_aerosol_optics:setup_general_aerosol_optics',1,hook_handle)
+        return
+      end if
+
+      if (file%exists('mass_ext_hydrophilic')) then
+        ao%use_hydrophilic = .true.
+      else
+        ao%use_hydrophilic = .false.
+      end if
+
+      call file%get('wavenumber', wavenumber)
+      nwn = size(wavenumber)
+
+      ! Read the raw scattering data
+      call file%get('mass_ext_hydrophobic',    mass_ext_phobic)
+      call file%get('ssa_hydrophobic',         ssa_phobic)
+      call file%get('asymmetry_hydrophobic',   g_phobic)
+      call file%get('lidar_ratio_hydrophobic', lidar_ratio_phobic)
+
+      call file%get_global_attribute('description_hydrophobic', &
+          &                         ao%description_phobic_str)
+
+      if (ao%use_hydrophilic) then
+        call file%get('mass_ext_hydrophilic',    mass_ext_philic)
+        call file%get('ssa_hydrophilic',         ssa_philic)
+        call file%get('asymmetry_hydrophilic',   g_philic)
+        call file%get('lidar_ratio_hydrophilic', lidar_ratio_philic)
+
+        call file%get('relative_humidity1',      ao%rh_lower)
+
+        call file%get_global_attribute('description_hydrophilic', &
+            &                         ao%description_philic_str)
+      end if
+
+      ! Close aerosol scattering file
       call file%close()
-      if (config%iverbosesetup >= 2) then
-        write(nulout,'(a)') 'Legacy aerosol optics file: mapping between bands'
-      end if
-      call setup_general_aerosol_optics_legacy(config, trim(config%aerosol_optics_file_name))
-      if (lhook) call dr_hook('radiation_aerosol_optics:setup_general_aerosol_optics',1,hook_handle)
-      return
-    end if
 
-    if (file%exists('mass_ext_hydrophilic')) then
-      ao%use_hydrophilic = .true.
-    else
-      ao%use_hydrophilic = .false.
-    end if
- 
-    call file%get('wavenumber', wavenumber)
-    nwn = size(wavenumber)
-
-    ! Read the raw scattering data
-    call file%get('mass_ext_hydrophobic',    mass_ext_phobic)
-    call file%get('ssa_hydrophobic',         ssa_phobic)
-    call file%get('asymmetry_hydrophobic',   g_phobic)
-    call file%get('lidar_ratio_hydrophobic', lidar_ratio_phobic)
-
-    call file%get_global_attribute('description_hydrophobic', &
-         &                         ao%description_phobic_str)
-
-    if (ao%use_hydrophilic) then
-      call file%get('mass_ext_hydrophilic',    mass_ext_philic)
-      call file%get('ssa_hydrophilic',         ssa_philic)
-      call file%get('asymmetry_hydrophilic',   g_philic)
-      call file%get('lidar_ratio_hydrophilic', lidar_ratio_philic)
-
-      call file%get('relative_humidity1',      ao%rh_lower)
-
-      call file%get_global_attribute('description_hydrophilic', &
-           &                         ao%description_philic_str)
-    end if
-
-    ! Close aerosol scattering file
-    call file%close()
-
-    n_type_phobic = size(mass_ext_phobic, 2)
-    if (ao%use_hydrophilic) then
-      n_type_philic = size(mass_ext_philic, 3)
-      nrh = size(ao%rh_lower)
-    else
-      n_type_philic = 0
-      nrh = 0
-    end if
-
-    if (config%do_cloud_aerosol_per_sw_g_point) then
-      nspecsw = config%gas_optics_sw%spectral_def%ng
-    else
-      nspecsw = config%gas_optics_sw%spectral_def%nband
-    end if
-
-    if (config%do_cloud_aerosol_per_lw_g_point) then
-      nspeclw = config%gas_optics_lw%spectral_def%ng
-    else
-      nspeclw = config%gas_optics_lw%spectral_def%nband
-    end if
-
-    if (allocated(ao%wavelength_mono)) then
-      ! Monochromatic wavelengths also required
-      nmono = size(ao%wavelength_mono)
-    else
-      nmono = 0
-    end if
-
-    call ao%allocate(n_type_phobic, n_type_philic, nrh, nspeclw, nspecsw, nmono)
-
-    if (config%do_sw) then
-      call config%gas_optics_sw%spectral_def%calc_mapping(wavenumber, mapping, &
-           &          use_bands=(.not. config%do_cloud_aerosol_per_sw_g_point))
-
-      ao%mass_ext_sw_phobic = matmul(mapping, mass_ext_phobic)
-      ao%ssa_sw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic) &
-           &           / ao%mass_ext_sw_phobic
-      ao%g_sw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic*g_phobic) &
-           &         / (ao%mass_ext_sw_phobic*ao%ssa_sw_phobic)
-
+      n_type_phobic = size(mass_ext_phobic, 2)
       if (ao%use_hydrophilic) then
-        do jtype = 1,n_type_philic
-          ao%mass_ext_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype))
-          ao%ssa_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
-               &                                        *ssa_philic(:,:,jtype)) &
-               &           / ao%mass_ext_sw_philic(:,:,jtype)
-          ao%g_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
-               &                       *ssa_philic(:,:,jtype)*g_philic(:,:,jtype)) &
-               &         / (ao%mass_ext_sw_philic(:,:,jtype)*ao%ssa_sw_philic(:,:,jtype))
-        end do
+        n_type_philic = size(mass_ext_philic, 3)
+        nrh = size(ao%rh_lower)
+      else
+        n_type_philic = 0
+        nrh = 0
       end if
-    end if
 
-    if (config%do_lw) then
-      call config%gas_optics_lw%spectral_def%calc_mapping(wavenumber, mapping, &
-           &          use_bands=(.not. config%do_cloud_aerosol_per_lw_g_point))
-
-      ao%mass_ext_lw_phobic = matmul(mapping, mass_ext_phobic)
-      ao%ssa_lw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic) &
-           &           / ao%mass_ext_lw_phobic
-      ao%g_lw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic*g_phobic) &
-           &         / (ao%mass_ext_lw_phobic*ao%ssa_lw_phobic)
-
-      if (ao%use_hydrophilic) then
-        do jtype = 1,n_type_philic
-          ao%mass_ext_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype))
-          ao%ssa_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
-               &                                        *ssa_philic(:,:,jtype)) &
-               &           / ao%mass_ext_lw_philic(:,:,jtype)
-          ao%g_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
-               &                       *ssa_philic(:,:,jtype)*g_philic(:,:,jtype)) &
-               &         / (ao%mass_ext_lw_philic(:,:,jtype)*ao%ssa_lw_philic(:,:,jtype))
-        end do
+      if (config%do_cloud_aerosol_per_sw_g_point) then
+        nspecsw = config%gas_optics_sw%spectral_def%ng
+      else
+        nspecsw = config%gas_optics_sw%spectral_def%nband
       end if
-    end if
 
-    if (allocated(ao%wavelength_mono)) then
-      ! Monochromatic wavelengths also required
-      do jwl = 1,nmono
-        ! Wavelength (m) to wavenumber (cm-1)
-        wavenumber_target = 0.01_jprb / ao%wavelength_mono(jwl)
-        ! Find index to first interpolation point, and its weight
-        if (wavenumber_target <= wavenumber(1)) then
-          weight1 = 1.0_jprb
-          iwn = 1
-        else if (wavenumber_target >= wavenumber(nwn)) then
-          iwn = nwn-1
-          weight1 = 0.0_jprb
-        else
-          iwn = 1
-          do while (wavenumber(iwn+1) < wavenumber_target .and. iwn < nwn-1)
-            iwn = iwn + 1
-          end do
-          weight1 = (wavenumber(iwn+1)-wavenumber_target) &
-               &  / (wavenumber(iwn+1)-wavenumber(iwn))
-        end if
-        ! Linear interpolation
-        ao%mass_ext_mono_phobic(jwl,:) = weight1 * mass_ext_phobic(iwn,:) &
-             &             + (1.0_jprb - weight1)* mass_ext_phobic(iwn+1,:)
-        ao%ssa_mono_phobic(jwl,:)      = weight1 * ssa_phobic(iwn,:) &
-             &             + (1.0_jprb - weight1)* ssa_phobic(iwn+1,:)
-        ao%g_mono_phobic(jwl,:)        = weight1 * g_phobic(iwn,:) &
-             &             + (1.0_jprb - weight1)* g_phobic(iwn+1,:)
-        ao%lidar_ratio_mono_phobic(jwl,:) = weight1 * lidar_ratio_phobic(iwn,:) &
-             &                + (1.0_jprb - weight1)* lidar_ratio_phobic(iwn+1,:)
+      if (config%do_cloud_aerosol_per_lw_g_point) then
+        nspeclw = config%gas_optics_lw%spectral_def%ng
+      else
+        nspeclw = config%gas_optics_lw%spectral_def%nband
+      end if
+
+      if (allocated(ao%wavelength_mono)) then
+        ! Monochromatic wavelengths also required
+        nmono = size(ao%wavelength_mono)
+      else
+        nmono = 0
+      end if
+
+      call ao%allocate(n_type_phobic, n_type_philic, nrh, nspeclw, nspecsw, nmono)
+
+      if (config%do_sw) then
+        call config%gas_optics_sw%spectral_def%calc_mapping(wavenumber, mapping, &
+            &          use_bands=(.not. config%do_cloud_aerosol_per_sw_g_point))
+
+        ao%mass_ext_sw_phobic = matmul(mapping, mass_ext_phobic)
+        ao%ssa_sw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic) &
+            &           / ao%mass_ext_sw_phobic
+        ao%g_sw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic*g_phobic) &
+            &         / (ao%mass_ext_sw_phobic*ao%ssa_sw_phobic)
+
         if (ao%use_hydrophilic) then
-          ao%mass_ext_mono_philic(jwl,:,:) = weight1 * mass_ext_philic(iwn,:,:) &
-               &               + (1.0_jprb - weight1)* mass_ext_philic(iwn+1,:,:)
-          ao%ssa_mono_philic(jwl,:,:)      = weight1 * ssa_philic(iwn,:,:) &
-               &               + (1.0_jprb - weight1)* ssa_philic(iwn+1,:,:)
-          ao%g_mono_philic(jwl,:,:)        = weight1 * g_philic(iwn,:,:) &
-               &               + (1.0_jprb - weight1)* g_philic(iwn+1,:,:)
-          ao%lidar_ratio_mono_philic(jwl,:,:) = weight1 * lidar_ratio_philic(iwn,:,:) &
-               &                  + (1.0_jprb - weight1)* lidar_ratio_philic(iwn+1,:,:)
+          do jtype = 1,n_type_philic
+            ao%mass_ext_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype))
+            ao%ssa_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
+                &                                        *ssa_philic(:,:,jtype)) &
+                &           / ao%mass_ext_sw_philic(:,:,jtype)
+            ao%g_sw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
+                &                       *ssa_philic(:,:,jtype)*g_philic(:,:,jtype)) &
+                &         / (ao%mass_ext_sw_philic(:,:,jtype)*ao%ssa_sw_philic(:,:,jtype))
+          end do
         end if
-      end do
-    end if
+      end if
 
-    ! Deallocate memory local to this routine
-    deallocate(mass_ext_phobic)
-    deallocate(ssa_phobic)
-    deallocate(g_phobic)
-    deallocate(lidar_ratio_phobic)
-    if (ao%use_hydrophilic) then
-      deallocate(mass_ext_philic)
-      deallocate(ssa_philic)
-      deallocate(g_philic)
-      deallocate(lidar_ratio_philic)
-    end if
+      if (config%do_lw) then
+        call config%gas_optics_lw%spectral_def%calc_mapping(wavenumber, mapping, &
+            &          use_bands=(.not. config%do_cloud_aerosol_per_lw_g_point))
+
+        ao%mass_ext_lw_phobic = matmul(mapping, mass_ext_phobic)
+        ao%ssa_lw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic) &
+            &           / ao%mass_ext_lw_phobic
+        ao%g_lw_phobic = matmul(mapping, mass_ext_phobic*ssa_phobic*g_phobic) &
+            &         / (ao%mass_ext_lw_phobic*ao%ssa_lw_phobic)
+
+        if (ao%use_hydrophilic) then
+          do jtype = 1,n_type_philic
+            ao%mass_ext_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype))
+            ao%ssa_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
+                &                                        *ssa_philic(:,:,jtype)) &
+                &           / ao%mass_ext_lw_philic(:,:,jtype)
+            ao%g_lw_philic(:,:,jtype) = matmul(mapping, mass_ext_philic(:,:,jtype) &
+                &                       *ssa_philic(:,:,jtype)*g_philic(:,:,jtype)) &
+                &         / (ao%mass_ext_lw_philic(:,:,jtype)*ao%ssa_lw_philic(:,:,jtype))
+          end do
+        end if
+      end if
+
+      if (allocated(ao%wavelength_mono)) then
+        ! Monochromatic wavelengths also required
+        do jwl = 1,nmono
+          ! Wavelength (m) to wavenumber (cm-1)
+          wavenumber_target = 0.01_jprb / ao%wavelength_mono(jwl)
+          ! Find index to first interpolation point, and its weight
+          if (wavenumber_target <= wavenumber(1)) then
+            weight1 = 1.0_jprb
+            iwn = 1
+          else if (wavenumber_target >= wavenumber(nwn)) then
+            iwn = nwn-1
+            weight1 = 0.0_jprb
+          else
+            iwn = 1
+            do while (wavenumber(iwn+1) < wavenumber_target .and. iwn < nwn-1)
+              iwn = iwn + 1
+            end do
+            weight1 = (wavenumber(iwn+1)-wavenumber_target) &
+                &  / (wavenumber(iwn+1)-wavenumber(iwn))
+          end if
+          ! Linear interpolation
+          ao%mass_ext_mono_phobic(jwl,:) = weight1 * mass_ext_phobic(iwn,:) &
+              &             + (1.0_jprb - weight1)* mass_ext_phobic(iwn+1,:)
+          ao%ssa_mono_phobic(jwl,:)      = weight1 * ssa_phobic(iwn,:) &
+              &             + (1.0_jprb - weight1)* ssa_phobic(iwn+1,:)
+          ao%g_mono_phobic(jwl,:)        = weight1 * g_phobic(iwn,:) &
+              &             + (1.0_jprb - weight1)* g_phobic(iwn+1,:)
+          ao%lidar_ratio_mono_phobic(jwl,:) = weight1 * lidar_ratio_phobic(iwn,:) &
+              &                + (1.0_jprb - weight1)* lidar_ratio_phobic(iwn+1,:)
+          if (ao%use_hydrophilic) then
+            ao%mass_ext_mono_philic(jwl,:,:) = weight1 * mass_ext_philic(iwn,:,:) &
+                &               + (1.0_jprb - weight1)* mass_ext_philic(iwn+1,:,:)
+            ao%ssa_mono_philic(jwl,:,:)      = weight1 * ssa_philic(iwn,:,:) &
+                &               + (1.0_jprb - weight1)* ssa_philic(iwn+1,:,:)
+            ao%g_mono_philic(jwl,:,:)        = weight1 * g_philic(iwn,:,:) &
+                &               + (1.0_jprb - weight1)* g_philic(iwn+1,:,:)
+            ao%lidar_ratio_mono_philic(jwl,:,:) = weight1 * lidar_ratio_philic(iwn,:,:) &
+                &                  + (1.0_jprb - weight1)* lidar_ratio_philic(iwn+1,:,:)
+          end if
+        end do
+      end if
+
+      ! Deallocate memory local to this routine
+      deallocate(mass_ext_phobic)
+      deallocate(ssa_phobic)
+      deallocate(g_phobic)
+      deallocate(lidar_ratio_phobic)
+      if (ao%use_hydrophilic) then
+        deallocate(mass_ext_philic)
+        deallocate(ssa_philic)
+        deallocate(g_philic)
+        deallocate(lidar_ratio_philic)
+      end if
+
+    end associate
 
     if (lhook) call dr_hook('radiation_aerosol_optics:setup_general_aerosol_optics',1,hook_handle)
 
@@ -471,12 +470,13 @@ contains
 
   end subroutine setup_general_aerosol_optics_legacy
 
+
   !---------------------------------------------------------------------
   ! Compute aerosol optical properties and add to existing gas optical
   ! depth and scattering properties
   subroutine add_aerosol_optics(nlev,istartcol,iendcol, &
-      &  config, thermodynamics, gas, aerosol, & 
-      &  od_lw, ssa_lw, g_lw, od_sw, ssa_sw, g_sw)
+       &  config, thermodynamics, gas, aerosol, &
+       &  od_lw, ssa_lw, g_lw, od_sw, ssa_sw, g_sw)
 
     use parkind1,                      only : jprb
     use radiation_io,                  only : nulout, nulerr, radiation_abort
@@ -487,8 +487,10 @@ contains
     use radiation_aerosol,             only : aerosol_type
     use radiation_constants,           only : AccelDueToGravity
     use radiation_aerosol_optics_data, only : aerosol_optics_type, &
-        &  IAerosolClassUndefined,   IAerosolClassIgnored, &
-        &  IAerosolClassHydrophobic, IAerosolClassHydrophilic
+         &  IAerosolClassUndefined,   IAerosolClassIgnored, &
+         &  IAerosolClassHydrophobic, IAerosolClassHydrophilic
+
+    real(jprb), parameter :: OneOverAccelDueToGravity = 1.0_jprb / AccelDueToGravity
 
     integer, intent(in) :: nlev               ! number of model levels
     integer, intent(in) :: istartcol, iendcol ! range of columns to process
@@ -880,7 +882,7 @@ contains
       ! Aerosol optical properties have been provided in each band
       ! directly by the user
       call add_aerosol_optics_direct(nlev,istartcol,iendcol, &
-           &  config, aerosol, & 
+           &  config, aerosol, &
            &  od_lw, ssa_lw, g_lw, od_sw, ssa_sw, g_sw)
     else
       ! Aerosol mixing ratios have been provided
@@ -943,12 +945,12 @@ contains
           ! hydrophilic-aerosol data
           rh  = h2o_mmr(jcol,jlev) / thermodynamics%h2o_sat_liq(jcol,jlev)
           irhs(jlev) = ao%calc_rh_index(rh)
-          
+
           factor(jlev) = ( thermodynamics%pressure_hl(jcol,jlev+1) &
                &    -thermodynamics%pressure_hl(jcol,jlev  )  ) &
-               &   * OneOverAccelDueToGravity  
+               &   * OneOverAccelDueToGravity
         end do
-        
+
         do jtype = 1,config%n_aerosol_types
           itype = ao%itype(jtype)
 
@@ -1136,7 +1138,7 @@ contains
   ! Add precomputed optical properties to gas optical depth and
   ! scattering properties
   subroutine add_aerosol_optics_direct(nlev,istartcol,iendcol, &
-       &  config, aerosol, & 
+       &  config, aerosol, &
        &  od_lw, ssa_lw, g_lw, od_sw, ssa_sw, g_sw)
 
     use parkind1,                      only : jprb
@@ -1264,7 +1266,7 @@ contains
       if (config%do_lw_aerosol_scattering) then
         ssa_lw(:,:,istartcol:iendcol) = 0.0_jprb
         g_lw(:,:,istartcol:iendcol)   = 0.0_jprb
- 
+
         ! Loop over position
         do jcol = istartcol,iendcol
 ! Added for DWD (2020)
@@ -1327,7 +1329,7 @@ contains
     if (lhook) call dr_hook('radiation_aerosol_optics:add_aerosol_optics_direct',1,hook_handle)
 
   end subroutine add_aerosol_optics_direct
- 
+
 
   !---------------------------------------------------------------------
   ! Sometimes it is useful to specify aerosol in terms of its optical
@@ -1352,7 +1354,7 @@ contains
 
     ! Wavelength (m)
     real(jprb), intent(in) :: wavelength
-    
+
     real(jprb) :: dry_aerosol_mass_extinction
 
     ! Index to the monochromatic wavelength requested
@@ -1414,7 +1416,7 @@ contains
 
     ! Pointer to the aerosol optics coefficients for brevity of access
     type(aerosol_optics_type), pointer :: ao
-    
+
     ! Loop indices for column and aerosol type
     integer :: jcol, jtype
 

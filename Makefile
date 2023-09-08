@@ -122,7 +122,7 @@ export FC
 export FCFLAGS = $(WARNFLAGS) $(BASICFLAGS) $(CPPFLAGS) -I../include \
 	$(OPTFLAGS) $(DEBUGFLAGS) $(BLAS_INCLUDE)  $(NETCDF_INCLUDE) $(TIMING_INCLUDE) $(OMPFLAG)
 export LIBS    = $(LDFLAGS) -L../lib -lradiation -lutilities \
-	-lifsrrtm -ldrhook -lifsaux  -lrrtmgp -lneural  -lstdc++ $(FCLIBS) $(LIBS_BLAS)  $(NETCDF_LIB) $(LIBS_TIMING) $(OMPFLAG)
+	-lifsrrtm -lifsaux  -lrrtmgp -lneural  -lstdc++ $(FCLIBS) $(LIBS_BLAS)  $(NETCDF_LIB) $(LIBS_TIMING) $(OMPFLAG)
 
 # Do we include Dr Hook from ECMWF's fiat library?
 ifdef FIATDIR
@@ -201,7 +201,7 @@ libifsrrtm: libifsaux
 librrtmgp:
 	cd rrtmgp-nn && $(MAKE)
 
-libradiation: libutilities libifsaux
+libradiation: libifsrrtm libutilities libifsaux
 	cd radiation && $(MAKE)
 
 driver: libifsaux libifsrrtm librrtmgp libutilities libradiation
