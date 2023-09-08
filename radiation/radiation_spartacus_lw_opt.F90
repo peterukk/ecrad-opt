@@ -465,7 +465,6 @@ contains
       ! sources for clear skies, using the Meador-Weaver formulas
       ! for reflectance and transmittance, and equivalent solutions
       ! to the coupled ODEs for the sources.
-! #define OPTIM_CODE 2
 #if OPTIM_CODE==2
       if (config%do_lw_aerosol_scattering) then
         call calc_reflectance_transmittance_lw_opt(ng*nlev, &
@@ -475,7 +474,6 @@ contains
             &  source_up_clear, source_dn_clear, &
             &  gamma1_clear, gamma2_clear)
       else
-
         call calc_no_scattering_transmittance_lw_opt(ng*nlev, &
         &  od(:,:, jcol), &
         &  planck_hl(:,1:nlev,jcol), planck_hl(:,2:nlev+1,jcol), & 

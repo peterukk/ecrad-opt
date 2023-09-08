@@ -9,8 +9,9 @@ Robin Hogan <r.j.hogan@ecmwf.int>
 This branch by Peter Ukkonen (<peterukk@gmail.com>) features:
 
 1. Extensive code optimization described in a [preprint uploaded to ESS](https://doi.org/10.22541/essoar.168298700.07329865/v1).
-To test the optimized versions of SPARTACUS and TripleClouds compile with
-`OPTIM_CODE=2`; for further speed-up for 32-term ecCKD models add `NG_SW=32 NG_LW=32`
+To test the optimized versions of SPARTACUS and TripleClouds compile ecRad with
+`OPTIM_CODE=2`; for further speed-up for 32-term ecCKD models add `NG_SW=32 NG_LW=32`.
+To learn how to produce the timings in the paper [see test/ifs-bigrand/README.md](test/ifs-bigrand/README.md)
 2. New gas optics schemes RRTMGP and RRTMGP-NN. 
 The implementation, development and testing of RRTMGP-NN is described 
 in [a GMD paper](https://doi.org/10.5194/egusphere-2022-1047).
