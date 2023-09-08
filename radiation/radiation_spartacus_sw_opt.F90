@@ -750,9 +750,9 @@ contains
           &  mu0, ssa_region_cld(:,:,jreg), g_region_cld(:,:,jreg), &
           &  gamma1_cld(:,:,jreg), gamma2_cld(:,:,jreg), gamma3_cld(:,:,jreg))
         end do 
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_3')
-#endif 
+! #ifdef USE_TIMING
+!     ret =  gptlstart('section_3_3')
+! #endif 
         ! --------------------------------------------------------------
         ! Section 3.3: Compute reflection, transmission and emission
         ! --------------------------------------------------------------
@@ -895,9 +895,9 @@ contains
           end do
         end do    
         end associate
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_3')
-#endif 
+! #ifdef USE_TIMING
+!     ret =  gptlstop('section_3_3')
+! #endif 
         ! --------------------------------------------------------------
         ! ------------------- END CLOUDY COMPUTATIONS ------------------
         ! --------------------------------------------------------------

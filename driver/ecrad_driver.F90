@@ -135,7 +135,7 @@ program ecrad_driver
 #ifdef USE_TIMING
   integer :: ret
   integer values(8)
-  character(len=100) :: timing_file_name
+  character(len=100) :: timing_file_name, name_gas_model, name_solver
   character(5) :: prefix, suffix
   !
   ! Initialize timers
@@ -510,26 +510,18 @@ ret = GPTLsetoption (GPTL_L3MRT, 1);
 #ifdef USE_TIMING
   ! End timers
   !  
-  ! if (config%i_gas_model == IGasModelIFSRRTMG) then
-
-  ! else if (config%i_gas_model == IGasModelECCKD) then
-
-  ! end if
-
-  ! if (config%i_solver_lw == ISolverMcICA) then
-  !   suffix = 'mcica'
-  ! else if (config%i_solver_lw == ISolverSPARTACUS) then
-  !   suffix = 'spart'
-  ! else if (config%i_solver_lw == ISolverTripleclouds) then  
-  !   suffix = 'tc'
-  ! end if
-
+  !! ret = gptlpr(driver_config%nblocksize)
+  ! call date_and_time(values=values)
+  ! write(timing_file_name,'(a,i4.4,a,i4.4,a,i4.4)') &
+  ! & 'timing.',values(6),'_',values(7),'_',values(8)
+  ! ret = gptlpr_file(trim(timing_file_name))
+  call config%get_gas_optics_name(name_gas_model)
+  call config%get_solver_name(name_solver)
   call date_and_time(values=values)
-  write(timing_file_name,'(a,i4.4,a,i4.4,a,i4.4)') &
-  & 'timing.',values(6),'_',values(7),'_',values(8)
+  write(timing_file_name,'(a,a,a,a,a,i0,a,i0,a,i4.4)') 'timing.', trim(name_gas_model), '_', trim(name_solver), &
+    & '_block', driver_config%nblocksize, '_nrep', driver_config%nrepeat, '_', values(8)
+  write(nulout,'(a,a)')  'Writing GPTL timing output to ', trim(timing_file_name)
   ret = gptlpr_file(trim(timing_file_name))
-  print*, timing_file_name
-  ret = gptlpr(driver_config%nblocksize)
   ret = gptlfinalize()
 #endif
 

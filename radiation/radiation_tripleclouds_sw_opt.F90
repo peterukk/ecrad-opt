@@ -657,6 +657,13 @@ integer, parameter :: ng = NG_SW
           flux_up(jg,1) = direct_dn(jg,1)*total_albedo_direct(jg,1,jlev+1) &
                &  +        flux_dn(jg,1)*total_albedo(jg,1,jlev+1)
         end do
+        ! BUG on ifort 2021.4.0 20210910 : after (but not before) the above loop flux_dn(:,2) sometimes has negative
+        ! values even though it should not be written to and was initialized to zero before jlev loop!
+        ! This only impacts sw_dn_diffuse_surf_g, not flux%sw_dn
+        ! Luckily the redundant writes are very fast on ifort anyway
+#if !defined(__INTEL_COMPILER)
+#define SKIP_REDUNDANT_WRITES
+#endif
         ! Fluxes for cloudy regions, if they exist
         if (.not. is_clear_sky_layer(jlev)) then
           flux_dn(:,2:) = (transmittance(:,2:,jlev)*flux_dn(:,2:) + direct_dn(:,2:) &
@@ -666,18 +673,25 @@ integer, parameter :: ng = NG_SW
           direct_dn(:,2:) = trans_dir_dir(:,2:,jlev)*direct_dn(:,2:)
           flux_up(:,2:) = direct_dn(:,2:)*total_albedo_direct(:,2:,jlev+1) &
                &  +   flux_dn(:,2:)*total_albedo(:,2:,jlev+1)
+#ifndef SKIP_REDUNDANT_WRITES
+        else
+          flux_dn(:,2:)  = 0.0_jprb
+          flux_up(:,2:)  = 0.0_jprb
+          direct_dn(:,2:)= 0.0_jprb
+#endif
         end if
 
-        if (.not. (is_clear_sky_layer(jlev) &
-             &    .and. is_clear_sky_layer(jlev+1))) then
-          ! Moved from above:
-          ! The zero initialization is quite slow and onl necessary if either the current and above layer 
-          ! aren't clear-sky because we can simply avoid adding zeroes in the broadband reduction
+        if (.not. (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1))) then
+          ! The zero writes are quite slow on GCC and only necessary if the layer is clear-sky
+          ! but the below one isn't (overlap rules), because we can simply avoid adding 
+          ! zeroes in the broadband reduction further below
+#ifdef SKIP_REDUNDANT_WRITES
           if (is_clear_sky_layer(jlev)) then
             flux_dn(:,2:)  = 0.0_jprb
             flux_up(:,2:)  = 0.0_jprb
             direct_dn(:,2:)= 0.0_jprb
-          end if 
+          end if
+#endif
           ! Account for overlap rules in translating fluxes just above
           ! a layer interface to the values just below
           flux_dn = singlemat_x_vec_sw(ng, &
@@ -688,6 +702,7 @@ integer, parameter :: ng = NG_SW
 
         ! Compute and store the broadband fluxes
         if (is_clear_sky_layer(jlev) .and. is_clear_sky_layer(jlev+1)) then
+          ! Fluxes in cloudy-regions are zero, so we don't need to sum over those
           sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
 #ifdef __NEC__
           !NEC$ shortloop
