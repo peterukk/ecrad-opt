@@ -75,6 +75,7 @@ contains
        &  config, single_level, thermodynamics, cloud, & 
        &  od, ssa, g, od_cloud, ssa_cloud, g_cloud, &
        &  albedo_direct, albedo_diffuse, incoming_sw, &
+       &  region_fracs, od_scaling, &
        &  flux)
 
     use parkind1, only           : jprb
@@ -98,7 +99,8 @@ contains
     use radiation_constants, only      : Pi, GasConstantDryAir, AccelDueToGravity
 
     implicit none
-
+    ! integer :: nreg !, ng
+    integer, parameter :: nreg = 3
     ! Inputs
     integer, intent(in) :: ng_sw_in           ! number of g-points
     integer, intent(in) :: nlev               ! number of model levels
@@ -124,11 +126,15 @@ contains
     real(jprb), intent(in), dimension(ng,istartcol:iendcol) :: &
          &  albedo_direct, albedo_diffuse, incoming_sw
 
+    ! The area fractions of each region
+    real(jprb), intent(in) :: region_fracs(1:nreg,nlev,istartcol:iendcol)
+
+    ! The scaling used for the optical depth in the cloudy regions
+    real(jprb), intent(in) :: od_scaling(2:nreg,nlev,istartcol:iendcol)
+
     ! Output
     type(flux_type), intent(inout):: flux
     ! Local variables
-    ! integer :: nreg !, ng
-    integer, parameter :: nreg = 3
     integer :: nregactive ! =1 in clear layer, =nreg in a cloudy layer
     integer :: jcol, jlev, jg, jreg, iband, jreg2,jreg3, j1, j2
 #ifdef EXPLICIT_EDGE_ENTRAPMENT
@@ -159,11 +165,11 @@ contains
     ! Scattering optical depths of gases and clouds
     real(jprb) :: scat_od, scat_od_cloud
 
-    ! The area fractions of each region
-    real(jprb) :: region_fracs(1:nreg,nlev,istartcol:iendcol)
+    ! ! The area fractions of each region
+    ! real(jprb) :: region_fracs(1:nreg,nlev,istartcol:iendcol)
 
-    ! The scaling used for the optical depth in the cloudy regions
-    real(jprb) :: od_scaling(2:nreg,nlev,istartcol:iendcol)
+    ! ! The scaling used for the optical depth in the cloudy regions
+    ! real(jprb) :: od_scaling(2:nreg,nlev,istartcol:iendcol)
 
     ! The length of the interface between regions jreg and jreg+1 per
     ! unit area of gridbox, equal to L_diff^ab in Hogan and Shonk
@@ -359,10 +365,10 @@ contains
 
     ! Compute the wavelength-independent region fractions and
     ! optical-depth scalings
-    call calc_region_properties(nlev,nreg,istartcol,iendcol, &
-         &  config%i_cloud_pdf_shape == IPdfShapeGamma, &
-         &  cloud%fraction, cloud%fractional_std, region_fracs, &
-         &  od_scaling, config%cloud_fraction_threshold)
+    ! call calc_region_properties(nlev,nreg,istartcol,iendcol, &
+    !      &  config%i_cloud_pdf_shape == IPdfShapeGamma, &
+    !      &  cloud%fraction, cloud%fractional_std, region_fracs, &
+    !      &  od_scaling, config%cloud_fraction_threshold)
 
     if (config%iverbose >= 3) then
          write(nulout,'(a)',advance='no') '  Processing columns'

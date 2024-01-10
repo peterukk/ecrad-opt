@@ -212,6 +212,7 @@ contains
     use radiation_cloud,          only : cloud_type
     use radiation_aerosol,        only : aerosol_type
     use radiation_flux,           only : flux_type
+    use radiation_regions,        only : calc_region_properties_new
     use radiation_spartacus_sw,   only : solver_spartacus_sw
     use radiation_spartacus_lw,   only : solver_spartacus_lw
     use radiation_tripleclouds_sw,only : solver_tripleclouds_sw
@@ -307,6 +308,8 @@ contains
     ! incoming radiation at top-of-atmosphere in each of the shortwave
     ! g-points
     real(jprb), dimension(config%n_g_sw,istartcol:iendcol) :: incoming_sw
+
+    real(jprb), dimension(:,:,:), allocatable :: region_fracs, od_scaling
 
     character(len=100) :: rad_prop_file_name
     character(*), parameter :: rad_prop_base_file_name = "radiative_properties"
@@ -408,6 +411,17 @@ contains
                &  od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
                &  od_sw_cloud, ssa_sw_cloud, g_sw_cloud)
         end if
+
+        if (config%i_solver_sw == ISolverSPARTACUS .or. config%i_solver_sw == ISolverTripleclouds .or. &
+            & config%i_solver_lw == ISolverSPARTACUS .or. config%i_solver_lw == ISolverTripleclouds) then 
+
+          allocate(region_fracs(1:3,nlev,istartcol:iendcol),  od_scaling(2:3,nlev,istartcol:iendcol))
+
+          call calc_region_properties_new(nlev, istartcol, iendcol, config, &
+              &  thermodynamics%temperature_hl, cloud%fraction, cloud%fractional_std, &
+              &  region_fracs, od_scaling, config%cloud_fraction_threshold)
+
+        end if 
       end if ! do_clouds
 
 #ifdef USE_TIMING
@@ -490,7 +504,9 @@ contains
           call solver_spartacus_lw_opt(config%n_g_lw, nlev,istartcol,iendcol, &
                &  config, thermodynamics, cloud, & 
                &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
-               &  planck_hl, lw_emission, lw_albedo, flux)
+               &  planck_hl, lw_emission, lw_albedo, &
+               &  region_fracs, od_scaling, &
+               &  flux)
 #else
           call solver_spartacus_lw(nlev,istartcol,iendcol, &
                &  config, thermodynamics, cloud, & 
@@ -509,7 +525,9 @@ contains
           call solver_tripleclouds_lw_opt(config%n_g_lw,nlev,istartcol,iendcol, &
                &  config, cloud, & 
                &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
-               &  planck_hl, lw_emission, lw_albedo, flux)
+               &  planck_hl, lw_emission, lw_albedo, &
+               &  region_fracs, od_scaling, &
+               &  flux)
 #else
           call solver_tripleclouds_lw(nlev,istartcol,iendcol, &
                &  config, cloud, & 
@@ -564,7 +582,9 @@ if (lhook) call dr_hook('radiation_interface:radiation_spartacus',0,hook_handle)
                &  config, single_level, thermodynamics, cloud, & 
                &  od_sw, ssa_sw, g_sw, od_sw_cloud, ssa_sw_cloud, &
                &  g_sw_cloud, sw_albedo_direct, sw_albedo_diffuse, &
-               &  incoming_sw, flux)
+               &  incoming_sw, &
+               &  region_fracs, od_scaling, &
+               &  flux)
 #else
           call solver_spartacus_sw(nlev,istartcol,iendcol, &
                &  config, single_level, thermodynamics, cloud, & 
@@ -587,7 +607,9 @@ if (lhook) call dr_hook('radiation_interface:radiation_spartacus',1,hook_handle)
                &  config, single_level, cloud, & 
                &  od_sw, ssa_sw, g_sw, od_sw_cloud, ssa_sw_cloud, &
                &  g_sw_cloud, sw_albedo_direct, sw_albedo_diffuse, &
-               &  incoming_sw, flux)
+               &  incoming_sw, &
+               &  region_fracs, od_scaling, &
+               &  flux)
 #else
         call solver_tripleclouds_sw(nlev,istartcol,iendcol, &
                &  config, single_level, cloud, & 

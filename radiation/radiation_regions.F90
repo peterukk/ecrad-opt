@@ -198,5 +198,203 @@ contains
 
   end subroutine calc_region_properties
 
+  ! More complex version allowing the of use log-normal distribution in warmer layers and a gamma distribution
+  ! in colder layers, motivated by Lee et al. 2010: https://doi.org/10.1029/2009jd013272
+  ! "In the lower to midtroposphere (altitudes of 1–6 km) in the tropics and subtropics, where 
+  ! nonprecipitating and pure liquid phase clouds are dominant, the PDFs of CLWC are best described
+  ! by lognormal distributions. In contrast, at altitudes above 6 km and in regions poleward of the 
+  ! midlatitudes, the CLWC more closely resembles a gamma distribution that coincides with a high 
+  ! frequency of occurrence of supercooled liquidclouds containing low CLWC values. "
+  subroutine calc_region_properties_new(nlev, istartcol, iendcol, config, temperature_hl, &
+       &  cloud_fraction, frac_std, reg_fracs, od_scaling, cloud_fraction_threshold)
+
+    use parkind1,     only : jprb
+    use yomhook,      only : lhook, dr_hook, jphook
+    use radiation_io, only : nulerr, radiation_abort
+    use radiation_config, only : config_type, IPdfShapeGamma, IPdfShapeLognormal, IPdfShapeMixed
+
+    ! Minimum od_scaling in the case of a Gamma distribution
+    real(jprb), parameter :: MinGammaODScaling = 0.025_jprb
+
+    ! At large fractional standard deviations (FSDs), we cannot
+    ! capture the behaviour of a gamma distribution with two equally
+    ! weighted points; we need to weight the first ("lower") point
+    ! more.  The weight of the first point is normally 0.5, but for
+    ! FSDs between 1.5 and 3.725 it rises linearly to 0.9, and for
+    ! higher FSD it is capped at this value.  The weight of the second
+    ! point is one minus the first point.
+    real(jprb), parameter :: MinLowerFrac      = 0.5_jprb
+    real(jprb), parameter :: MaxLowerFrac      = 0.9_jprb
+    real(jprb), parameter :: FSDAtMinLowerFrac = 1.5_jprb
+    real(jprb), parameter :: FSDAtMaxLowerFrac = 3.725_jprb
+    ! Between FSDAtMinLowerFrac and FSDAtMaxLowerFrac,
+    ! LowerFrac=LowerFracFSDIntercept+FSD*LowerFracFSDGradient
+    real(jprb), parameter :: LowerFracFSDGradient &
+         &  = (MaxLowerFrac-MinLowerFrac) / (FSDAtMaxLowerFrac-FSDAtMinLowerFrac)
+    real(jprb), parameter :: LowerFracFSDIntercept &
+         &  = MinLowerFrac - FSDAtMinLowerFrac*LowerFracFSDGradient
+
+    ! Number of levels and regions
+    integer, intent(in) :: nlev
+
+    ! Range of columns to process
+    integer, intent(in) :: istartcol, iendcol
+
+    type(config_type), intent(in) :: config
+
+    real(jprb), intent(in), dimension(:,:) :: temperature_hl ! (ncol,nlev+1)
+
+    ! Cloud fraction, i.e. the fraction of the gridbox assigned to all
+    ! regions numbered 2 and above (region 1 is clear sky)
+    real(jprb), intent(in), dimension(:,:)  :: cloud_fraction ! (ncol,nlev)
+
+    ! Fractional standard deviation of in-cloud water content
+    real(jprb), intent(in), dimension(:,:)  :: frac_std       ! (ncol,nlev)
+
+    ! Fractional area coverage of each region
+    real(jprb), intent(out) :: reg_fracs(1:3,nlev,istartcol:iendcol)
+
+    ! Optical depth scaling for the cloudy regions
+    real(jprb), intent(out) :: od_scaling(2:3,nlev,istartcol:iendcol)
+
+    ! Regions smaller than this are ignored
+    real(jprb), intent(in), optional :: cloud_fraction_threshold
+
+    ! In case the user doesn't supply cloud_fraction_threshold we use
+    ! a default value
+    real(jprb) :: frac_threshold
+
+    ! Temperature threshold above which to use log-normal 
+    ! Just a rough estimate from Fig 3 in Lee et al. (2010)
+    real(jprb), parameter :: temp_threshold = 260.0_jprb
+
+    ! Loop indices
+    integer :: jcol, jlev
+
+    real(jphook) :: hook_handle
+
+    if (lhook) call dr_hook('radiation_region_properties:calc_region_properties_conditional',0,hook_handle)
+
+    if (present(cloud_fraction_threshold)) then
+      frac_threshold = cloud_fraction_threshold
+    else
+      frac_threshold = 1.0e-20_jprb
+    end if
+
+    if (config%i_cloud_pdf_shape == IPdfShapeMixed) then
+      do jcol = istartcol,iendcol
+        do jlev = 1,nlev
+          if(temperature_hl(jcol,jlev) > temp_threshold) then 
+            ! Log-normal assumed for warmer layers
+
+            ! If we treat the distribution as a lognormal such that the
+            ! equivalent Normal has a mean mu and standard deviation
+            ! sigma, then the 16th percentile of the lognormal is very
+            ! close to exp(mu-sigma).
+            if (cloud_fraction(jcol,jlev) < frac_threshold) then
+              reg_fracs(1,jlev,jcol)    = 1.0_jprb
+              reg_fracs(2:3,jlev,jcol)  = 0.0_jprb
+              od_scaling(2:3,jlev,jcol) = 1.0_jprb
+            else
+              reg_fracs(1,jlev,jcol) = 1.0_jprb - cloud_fraction(jcol,jlev)
+              reg_fracs(2:3,jlev,jcol) = cloud_fraction(jcol,jlev)*0.5_jprb
+              od_scaling(2,jlev,jcol) &
+                    &  = exp(-sqrt(log(frac_std(jcol,jlev)**2+1))) &
+                    &  / sqrt(frac_std(jcol,jlev)**2+1)
+              od_scaling(3,jlev,jcol) = 2.0_jprb - od_scaling(2,jlev,jcol)
+            end if
+          else  
+            ! Gamma distribution assumed for colder layers
+            ! If we treat the distribution as a gamma then the 16th
+            ! percentile is close to the following.  Note that because it
+            ! becomes vanishingly small for FSD >~ 2, we have a lower
+            ! limit of 1/40, and for higher FSDs reduce the fractional
+            ! cover of the denser region - see region_fractions routine
+            ! below
+            if (cloud_fraction(jcol,jlev) < frac_threshold) then
+              reg_fracs(1,jlev,jcol)    = 1.0_jprb
+              reg_fracs(2:3,jlev,jcol)  = 0.0_jprb
+              od_scaling(2:3,jlev,jcol) = 1.0_jprb
+            else
+              ! Fraction of the clear-sky region
+              reg_fracs(1,jlev,jcol) = 1.0_jprb - cloud_fraction(jcol,jlev)
+              ! Fraction and optical-depth scaling of the lower of the
+              ! two cloudy regions
+              reg_fracs(2,jlev,jcol) = cloud_fraction(jcol,jlev) &
+                    &  * max(MinLowerFrac, min(MaxLowerFrac, &
+                    &  LowerFracFSDIntercept + frac_std(jcol,jlev)*LowerFracFSDGradient))
+              od_scaling(2,jlev,jcol) = MinGammaODScaling &
+                    &  + (1.0_jprb - MinGammaODScaling) &
+                    &    * exp(-frac_std(jcol,jlev)*(1.0_jprb + 0.5_jprb*frac_std(jcol,jlev) &
+                    &                     *(1.0_jprb+0.5_jprb*frac_std(jcol,jlev))))
+              ! Fraction of the upper of the two cloudy regions
+              reg_fracs(3,jlev,jcol) = 1.0_jprb-reg_fracs(1,jlev,jcol)-reg_fracs(2,jlev,jcol)
+              ! Ensure conservation of the mean optical depth
+              od_scaling(3,jlev,jcol) = (cloud_fraction(jcol,jlev) &
+                    &  -reg_fracs(2,jlev,jcol)*od_scaling(2,jlev,jcol)) / reg_fracs(3,jlev,jcol)
+            end if
+          end if
+        end do 
+      end do 
+    else if (config%i_cloud_pdf_shape == IPdfShapeLognormal) then
+      ! If we treat the distribution as a lognormal such that the
+      ! equivalent Normal has a mean mu and standard deviation
+      ! sigma, then the 16th percentile of the lognormal is very
+      ! close to exp(mu-sigma).
+      do jcol = istartcol,iendcol
+        do jlev = 1,nlev
+          if (cloud_fraction(jcol,jlev) < frac_threshold) then
+            reg_fracs(1,jlev,jcol)       = 1.0_jprb
+            reg_fracs(2:3,jlev,jcol)  = 0.0_jprb
+            od_scaling(2:3,jlev,jcol) = 1.0_jprb
+          else
+            reg_fracs(1,jlev,jcol) = 1.0_jprb - cloud_fraction(jcol,jlev)
+            reg_fracs(2:3,jlev,jcol) = cloud_fraction(jcol,jlev)*0.5_jprb
+            od_scaling(2,jlev,jcol) &
+                  &  = exp(-sqrt(log(frac_std(jcol,jlev)**2+1))) &
+                  &  / sqrt(frac_std(jcol,jlev)**2+1)
+            od_scaling(3,jlev,jcol) = 2.0_jprb - od_scaling(2,jlev,jcol)
+          end if
+        end do
+      end do
+    else 
+      ! If we treat the distribution as a gamma then the 16th
+      ! percentile is close to the following.  Note that because it
+      ! becomes vanishingly small for FSD >~ 2, we have a lower
+      ! limit of 1/40, and for higher FSDs reduce the fractional
+      ! cover of the denser region - see region_fractions routine
+      ! below
+      do jcol = istartcol,iendcol
+        do jlev = 1,nlev
+          if (cloud_fraction(jcol,jlev) < frac_threshold) then
+            reg_fracs(1,jlev,jcol)    = 1.0_jprb
+            reg_fracs(2:3,jlev,jcol)  = 0.0_jprb
+            od_scaling(2:3,jlev,jcol) = 1.0_jprb
+          else
+            ! Fraction of the clear-sky region
+            reg_fracs(1,jlev,jcol) = 1.0_jprb - cloud_fraction(jcol,jlev)
+            ! Improved behaviour.
+            ! Fraction and optical-depth scaling of the lower of the
+            ! two cloudy regions
+            reg_fracs(2,jlev,jcol) = cloud_fraction(jcol,jlev) &
+                  &  * max(MinLowerFrac, min(MaxLowerFrac, &
+                  &  LowerFracFSDIntercept + frac_std(jcol,jlev)*LowerFracFSDGradient))
+            od_scaling(2,jlev,jcol) = MinGammaODScaling &
+                  &  + (1.0_jprb - MinGammaODScaling) &
+                  &    * exp(-frac_std(jcol,jlev)*(1.0_jprb + 0.5_jprb*frac_std(jcol,jlev) &
+                  &                     *(1.0_jprb+0.5_jprb*frac_std(jcol,jlev))))
+            ! Fraction of the upper of the two cloudy regions
+            reg_fracs(3,jlev,jcol) = 1.0_jprb-reg_fracs(1,jlev,jcol)-reg_fracs(2,jlev,jcol)
+            ! Ensure conservation of the mean optical depth
+            od_scaling(3,jlev,jcol) = (cloud_fraction(jcol,jlev) &
+                  &  -reg_fracs(2,jlev,jcol)*od_scaling(2,jlev,jcol)) / reg_fracs(3,jlev,jcol)
+          end if
+        end do
+      end do
+    end if 
+    if (lhook) call dr_hook('radiation_region_properties:calc_region_properties_new',1,hook_handle)
+
+  end subroutine calc_region_properties_new
+
 end module radiation_regions
 

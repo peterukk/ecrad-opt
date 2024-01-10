@@ -41,6 +41,7 @@ contains
        &  config, cloud, & 
        &  od, ssa, g, od_cloud, ssa_cloud, g_cloud, planck_hl, &
        &  emission, albedo, &
+       &  region_fracs, od_scaling, &
        &  flux)
 
     use parkind1, only           : jprb
@@ -120,17 +121,23 @@ contains
     ! cloud inhomogeneity
     real(jprb), dimension(ng) :: od_cloud_new
 
+    ! The area fractions of each region
+    real(jprb), intent(in) :: region_fracs(1:nregions,nlev,istartcol:iendcol)
+
+    ! The scaling used for the optical depth in the cloudy regions
+    real(jprb), intent(in) :: od_scaling(2:nregions,nlev,istartcol:iendcol)
+
     ! Output
     type(flux_type), intent(inout):: flux
     
     ! In a clear-sky layer this will be 1, otherwise equal to nregions
     ! integer :: nreg
 
-    ! The area fractions of each region
-    real(jprb) :: region_fracs(1:nregions,nlev,istartcol:iendcol)
+    ! ! The area fractions of each region
+    ! real(jprb) :: region_fracs(1:nregions,nlev,istartcol:iendcol)
 
-    ! The scaling used for the optical depth in the cloudy regions
-    real(jprb) :: od_scaling(2:nregions,nlev,istartcol:iendcol)
+    ! ! The scaling used for the optical depth in the cloudy regions
+    ! real(jprb) :: od_scaling(2:nregions,nlev,istartcol:iendcol)
 
     ! Directional overlap matrices defined at all layer interfaces
     ! including top-of-atmosphere and the surface
@@ -212,10 +219,10 @@ contains
 
     ! Compute the wavelength-independent region fractions and
     ! optical-depth scalings
-    call calc_region_properties(nlev,nregions,istartcol,iendcol, &
-         &  config%i_cloud_pdf_shape == IPdfShapeGamma, &
-         &  cloud%fraction, cloud%fractional_std, region_fracs, &
-         &  od_scaling, config%cloud_fraction_threshold)
+    ! call calc_region_properties(nlev,nregions,istartcol,iendcol, &
+    !      &  config%i_cloud_pdf_shape == IPdfShapeGamma, &
+    !      &  cloud%fraction, cloud%fractional_std, region_fracs, &
+    !      &  od_scaling, config%cloud_fraction_threshold)
 
     ! Main loop over columns
     do jcol = istartcol, iendcol

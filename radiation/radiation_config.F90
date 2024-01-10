@@ -134,10 +134,11 @@ module radiation_config
 
   ! Cloud PDF distribution shapes
   enum, bind(c)
-    enumerator IPdfShapeLognormal, IPdfShapeGamma
+    enumerator IPdfShapeLognormal, IPdfShapeGamma, IPdfShapeMixed
   end enum
-  character(len=*), parameter :: PdfShapeName(0:1) = (/ 'Lognormal', &
-       &                                                'Gamma    ' /)
+  character(len=*), parameter :: PdfShapeName(0:2) = (/ 'Lognormal', &
+       &                                                'Gamma    ', &
+       &                                                'Mixed    ' /)
 
   ! Maximum number of different aerosol types that can be provided
   integer, parameter :: NMaxAerosolTypes = 256
@@ -213,7 +214,8 @@ module radiation_config
 #endif
 
     ! Shape of sub-grid cloud water PDF
-    integer :: i_cloud_pdf_shape = IPdfShapeGamma
+    integer :: i_cloud_pdf_shape = IPdfShapeMixed 
+    ! integer :: i_cloud_pdf_shape = IPdfShapeGamma
 
     ! The ratio of the overlap decorrelation length for cloud
     ! inhomogeneities to the overlap decorrelation length for cloud
