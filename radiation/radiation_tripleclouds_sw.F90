@@ -209,11 +209,21 @@ integer, parameter :: ng = NG_SW
 
     ! Main loop over columns
     do jcol = istartcol, iendcol
+
+      ! Define which layers contain cloud; assume that
+      ! cloud%crop_cloud_fraction has already been called
+      is_clear_sky_layer = .true.
+      do jlev = 1,nlev
+        if (cloud%fraction(jcol,jlev) > 0.0_jprb) then
+          is_clear_sky_layer(jlev) = .false.
+        end if
+      end do
+
       ! Compute wavelength-independent overlap matrix v_matrix
 #ifdef USE_TIMING
     ret =  gptlstart('overlap_matrices')
 #endif 
-      call calc_overlap_matrices_nocol(nlev,nregions, &
+      call calc_overlap_matrices_nocol(nlev,nregions, is_clear_sky_layer, &
       &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
       &  v_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
       &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
@@ -271,14 +281,6 @@ integer, parameter :: ng = NG_SW
 
       ! At this point mu0 >= 1.0e-10
 
-      ! Define which layers contain cloud; assume that
-      ! cloud%crop_cloud_fraction has already been called
-      is_clear_sky_layer = .true.
-      do jlev = 1,nlev
-        if (cloud%fraction(jcol,jlev) > 0.0_jprb) then
-          is_clear_sky_layer(jlev) = .false.
-        end if
-      end do
 
       ! --------------------------------------------------------
       ! Section 3: Loop over layers to compute reflectance and transmittance
@@ -619,14 +621,7 @@ integer, parameter :: ng = NG_SW
                &  +        flux_dn(jg,1)*total_albedo(jg,1,jlev+1)
         end do
         ! Fluxes for cloudy regions, if they exist
-        if (is_clear_sky_layer(jlev)) then
-          ! The following zero initialization is actually slow (4% of runtime with ECCKD), and only strictly speaking necessary
-          ! if either the current and above layer aren't clear-sky (conditional below), because 
-          ! we can avoid simply adding zeroes in the broadband reduction later
-          ! flux_dn(:,2:)  = 0.0_jprb
-          ! flux_up(:,2:)  = 0.0_jprb
-          ! direct_dn(:,2:)= 0.0_jprb
-        else
+        if (.not. is_clear_sky_layer(jlev)) then
           flux_dn(:,2:) = (transmittance(:,2:,jlev)*flux_dn(:,2:) + direct_dn(:,2:) &
                &  * (trans_dir_dir(:,2:,jlev)*total_albedo_direct(:,2:,jlev+1)*reflectance(:,2:,jlev) &
                &     + trans_dir_diff(:,2:,jlev) )) &
@@ -638,7 +633,9 @@ integer, parameter :: ng = NG_SW
 
         if (.not. (is_clear_sky_layer(jlev) &
              &    .and. is_clear_sky_layer(jlev+1))) then
-          ! Moved from above
+          ! Moved from above:
+          ! The zero initialization is quite slow and only necessary if either the current and above layer 
+          ! aren't clear-sky because we can simply avoid adding zeroes in the broadband reduction
           if (is_clear_sky_layer(jlev)) then
             flux_dn(:,2:)  = 0.0_jprb
             flux_up(:,2:)  = 0.0_jprb

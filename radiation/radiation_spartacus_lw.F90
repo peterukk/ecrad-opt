@@ -344,14 +344,6 @@ contains
         write(nulout,'(a)',advance='no') '.'
       end if
 
-      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix
-      call calc_overlap_matrices_nocol(nlev,nreg, &
-      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
-      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
-      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
-      &  use_beta_overlap=config%use_beta_overlap, &
-      &  cloud_cover=flux%cloud_cover_lw(jcol))
-
       ! Define which layers contain cloud; assume that
       ! cloud%crop_cloud_fraction has already been called
       is_clear_sky_layer = .true.
@@ -431,6 +423,15 @@ contains
         end if
         
       end do ! jlev
+
+
+      ! Compute wavelength-independent overlap matrices u_matrix and v_matrix
+      call calc_overlap_matrices_nocol(nlev,nreg, is_clear_sky_layer, &
+      &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
+      &  v_matrix, u_matrix=u_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
+      &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
+      &  use_beta_overlap=config%use_beta_overlap, &
+      &  cloud_cover=flux%cloud_cover_lw(jcol))
 
       ! --------------------------------------------------------
       ! Section 3
@@ -1247,8 +1248,8 @@ contains
         end if
 
         ! Store the broadband fluxes
+        sums_up = 0.0_jprb; sums_dn = 0.0_jprb
         if (is_clear_sky_layer(jlev)) then
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb
 #ifdef __NEC__
           !NEC$ shortloop
 #else
@@ -1259,7 +1260,6 @@ contains
             sums_dn = sums_dn + flux_dn_above(jg,1)
           end do
         else 
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb
 #ifdef __NEC__
           !NEC$ shortloop
 #else
