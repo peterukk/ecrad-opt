@@ -225,10 +225,6 @@ contains
     use radiation_gas_constants
     use mo_rte_util_array,     only:  any_vals_outside
 
-#ifdef USE_TIMING
-  ! Timing library
-    use gptl,                  only: gptlstart, gptlstop
-#endif
 
     integer, intent(in) :: ncol               ! number of columns
     integer, intent(in) :: nlev               ! number of model levels
@@ -275,10 +271,7 @@ contains
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_ifs_rrtmgp:gas_optics',0,hook_handle)
-
-#ifdef USE_TIMING
-  ret =  gptlstart('gas_optics_sw')
-#endif     
+   
     if (config%i_gas_model == IGasModelRRTMGP_NN) use_neural_nets = .true.
 
     ncol_loc = iendcol-istartcol+1
@@ -370,10 +363,6 @@ contains
       od_sw(:,:,istartcol:iendcol) = max(config%min_gas_od_sw, od_sw(:,:,istartcol:iendcol))
 
     end if
-#ifdef USE_TIMING
-  ret =  gptlstop('gas_optics_sw')
-  ret =  gptlstart('gas_optics_lw')
-#endif  
 
     if (config%do_lw) then
         if (use_neural_nets) then
@@ -438,9 +427,6 @@ contains
     deallocate(pressure_fl, temperature_fl)
     deallocate(pressure_hl, temperature_hl)
 
-#ifdef USE_TIMING
-  ret =  gptlstop('gas_optics_lw')
-#endif 
 
    if (lhook) call dr_hook('radiation_ifs_rrtmgp:gas_optics',1,hook_handle)
     

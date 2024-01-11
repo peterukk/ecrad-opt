@@ -28,10 +28,6 @@ module radiation_matrix
 
   use parkind1, only : jprb, jprd
 
-#ifdef USE_TIMING
-    ! Timing library
-    use gptl,                  only: gptlstart, gptlstop
-#endif
 
   implicit none
   public
@@ -1809,9 +1805,7 @@ contains
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_matrix:expm',0,hook_handle)
-#ifdef USE_TIMING
-    ret =  gptlstart('expm')
-#endif 
+
     normA = 0.0_jprb
 
     ! Compute the 1-norms of A
@@ -1880,9 +1874,7 @@ contains
     end do
 
     if (lhook) call dr_hook('radiation_matrix:expm',1,hook_handle)
-#ifdef USE_TIMING
-    ret =  gptlstop('expm')
-#endif 
+
   end subroutine expm
 
   subroutine expm_lw(n,A)
@@ -1912,9 +1904,7 @@ contains
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_matrix:expm',0,hook_handle)
-#ifdef USE_TIMING
-    ret =  gptlstart('expm_lw')
-#endif 
+
     normA = 0.0_jprb
 
     ! Compute the 1-norms of A
@@ -2015,9 +2005,7 @@ contains
     end do
 
     if (lhook) call dr_hook('radiation_matrix:expm',1,hook_handle)
-#ifdef USE_TIMING
-    ret =  gptlstop('expm_lw')
-#endif 
+
   end subroutine expm_lw
 
   !---------------------------------------------------------------------
@@ -2048,9 +2036,7 @@ contains
     integer    :: j1, j2, j3, jg, minexpo, nrepeat, jS, jE
     integer    :: expo(ng_sw*nlev_b)
     real(jphook) :: hook_handle
-#ifdef USE_TIMING
-    ret =  gptlstart('expm_sw')
-#endif 
+
     if (lhook) call dr_hook('radiation_matrix:expm_sw',0,hook_handle)
 
     ! Compute the 1-norms of A
@@ -2086,10 +2072,7 @@ contains
         end do
       end do
 
-    ! Pade approximant of degree 7
-#ifdef USE_TIMING
-    ret =  gptlstart('expm_Pade_mat_x_mat')
-#endif 
+      ! Pade approximant of degree 7
       ! Input and output matrices have zeroes in the lower left corner AND repeated elements
       ! call mat_square_sw_repeats(N,A,A2) 
       ! call mat_square_sw_repeats(N,A2,A4)
@@ -2113,9 +2096,6 @@ contains
       ! call mat_x_mat_sw(N,A,V,U) ! matrices have zeroes in the lower left corner, but no repeats
       call mat_x_mat_sw(ng_sw,nlev_b,A,V,U) ! matrices have zeroes in the lower left corner, but no repeats
 
-#ifdef USE_TIMING
-    ret =  gptlstop('expm_Pade_mat_x_mat')
-#endif 
       do j3 = 1,9
         do j2 = 1,9
           if (.not.((j2>6) .and. (j3<7))) then
@@ -2208,9 +2188,7 @@ contains
     end do 
 
     if (lhook) call dr_hook('radiation_matrix:expm_sw',1,hook_handle)
-#ifdef USE_TIMING
-    ret =  gptlstop('expm_sw')
-#endif 
+
   end subroutine expm_sw
 
 
@@ -2374,9 +2352,6 @@ contains
     minusones = -1
 #endif
 
-! #ifdef USE_TIMING
-!     ret =  gptlstart('fastexpm')
-! #endif 
 
     if (lhook) call dr_hook('radiation_matrix:fast_expm_exchange_3',0,hook_handle)
     associate(a=>R(:,2,1),b=>R(:,1,2),c=>R(:,3,2),d=>R(:,2,3))
@@ -2533,9 +2508,6 @@ contains
             &     + V(:,j2,3)*X(:,3,j1)
       end do
     end do
-! #ifdef USE_TIMING
-!     ret =  gptlstop('fastexpm')
-! #endif 
 
   if (lhook) call dr_hook('radiation_matrix:fast_expm_exchange_3',1,hook_handle)
 

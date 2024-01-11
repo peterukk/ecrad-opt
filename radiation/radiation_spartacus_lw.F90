@@ -438,17 +438,10 @@ contains
       ! --------------------------------------------------------
       ! In this section the reflectance, transmittance and sources
       ! are computed for each layer
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_lw')
-#endif 
 
       ! Set optical depth of clear-sky region (region 1) to the
       ! gas/aerosol optical depth
       od_region_clear = od(:,:,jcol)
-
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_reftrans_clear')
-#endif 
 
       if (config%do_lw_aerosol_scattering) then
         ssa_clear => ssa(:,:,jcol)
@@ -499,9 +492,6 @@ contains
         source_dn(:,1,jlev) = region_fracs(1,jlev,jcol)*source_dn_clear(:,jlev)
       end do
 
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_reftrans_clear')
-#endif 
 
      ! 2.  Cloudy-sky computations
       are_clouds_below = .false.
@@ -843,9 +833,7 @@ contains
             ! Copy Gamma2*z1
             Gamma_z1(j1:j2,1:nreg,nreg+1:2*nreg)  = -Gamma_z1(j1:j2,nreg+1:2*nreg,1:nreg)
           end do
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_lu')
-#endif 
+
           ! Compute the parts of the particular solution
           ! solution_diff(:,1:2*nreg) = solve_vec(ng3D_tot,ng3D_tot,2*nreg,Gamma_z1,planck_diff)
           ! solution_diff(:,1:2*nreg) = - solution_diff(:,1:2*nreg) 
@@ -863,9 +851,6 @@ contains
           planck_top = solution_diff - planck_top
           call lu_substitution_lw_inplace(ng3D_tot, LU, solution0) ! overwrite planck_top with solution
 
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_lu')
-#endif 
           ! Additional security on elements fed to matrix exponential
           ! in single precision
           if (jprb <= 4) then
@@ -975,12 +960,6 @@ contains
         end if
      end do
 
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_lw')
-#endif         
-#ifdef USE_TIMING
-    ret =  gptlstart('section_4_lw')
-#endif 
       ! --------------------------------------------------------
       ! Section 4: Compute total sources and albedos
       ! --------------------------------------------------------
@@ -1145,12 +1124,7 @@ contains
         end if
 
       end do ! Reverse loop over levels
-#ifdef USE_TIMING
-    ret =  gptlstop('section_4_lw')
-#endif 
-#ifdef USE_TIMING
-    ret =  gptlstart('section_5_lw')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 5: Compute fluxes
       ! --------------------------------------------------------
@@ -1317,22 +1291,14 @@ contains
       ! Compute the longwave derivatives needed by Hogan and Bozzo
       ! (2015) approximate radiation update scheme
       if (config%do_lw_derivatives) then
-! #ifdef USE_TIMING
-!     ret =  gptlstart('section_5_lw_deriv')
-! #endif 
         ! Note that at this point flux_up_above contains the spectral
         ! fluxes into the regions of the lowest layer; we sum over
         ! regions first to provide a simple spectral flux upwelling
         ! from the surface
         call calc_lw_derivatives_matrix(ng, nlev, nreg, jcol, transmittance, &
              &  u_matrix(:,:,:), sum(flux_up_above,2), flux%lw_derivatives)
-! #ifdef USE_TIMING
-!     ret =  gptlstop('section_5_lw_deriv')
-! #endif  
       end if
-#ifdef USE_TIMING
-    ret =  gptlstop('section_5_lw')
-#endif 
+
     end do ! Loop over columns
 
     if (config%iverbose >= 3) then

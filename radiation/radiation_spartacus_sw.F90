@@ -555,21 +555,13 @@ contains
       ! To avoid overflow in expm the optical depth for clear-sky region must then be capped 
 
       ! 1. Reftrans computations for clear-sky-region : these are done for all layers, also for cloudy layers
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3')
-#endif 
       od_region_clear = od(:,:,jcol)
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_reftrans_clear_sw')
-#endif 
+
       call calc_reflectance_transmittance_sw(ng*nlev, &
           &  mu0, od_region_clear, ssa(:,:,jcol), g(:,:,jcol), &
           &  ref_clear, trans_clear, ref_dir_clear, trans_dir_diff_clear, trans_dir_dir_clear, &
           &  gamma1_clear, gamma2_clear, gamma3_clear)
 
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_reftrans_clear_sw')
-#endif 
       ! for 3D computations, cap the optical depth of clear-sky region to a threshold
       od_region_clear = min(od_region_clear,config%max_gas_od_3D)
  
@@ -742,9 +734,7 @@ contains
           &  mu0, ssa_region_cld(:,:,jreg), g_region_cld(:,:,jreg), &
           &  gamma1_cld(:,:,jreg), gamma2_cld(:,:,jreg), gamma3_cld(:,:,jreg))
         end do 
-#ifdef USE_TIMING
-    ret =  gptlstart('section_3_3')
-#endif 
+
         ! --------------------------------------------------------------
         ! Section 3.3: Compute reflection, transmission and emission
         ! --------------------------------------------------------------
@@ -884,9 +874,7 @@ contains
           end do
         end do    
         end associate
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_3')
-#endif 
+
         ! --------------------------------------------------------------
         ! ------------------- END CLOUDY COMPUTATIONS ------------------
         ! --------------------------------------------------------------
@@ -913,15 +901,10 @@ contains
           are_clouds_below=.false.
         end if
      end do
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 4: Compute total albedos
       ! --------------------------------------------------------
-#ifdef USE_TIMING
-      ret =  gptlstart('section_4')
-#endif 
 
      total_albedo(:,:,:,nlev+1)        = 0.0_jprb
      total_albedo_direct(:,:,:,nlev+1) = 0.0_jprb
@@ -1401,10 +1384,6 @@ end if
 
       end do ! Reverse loop over levels
 
-#ifdef USE_TIMING
-      ret =  gptlstop('section_4')
-      ret =  gptlstart('section_5')
-#endif 
       ! --------------------------------------------------------
       ! Section 5: Compute fluxes
       ! --------------------------------------------------------
@@ -1668,9 +1647,6 @@ end if
         flux%sw_dn_direct_surf_clear_g(:,jcol)  = mu0 * direct_dn_clear
       end if
       
-#ifdef USE_TIMING
-    ret =  gptlstop('section_5')
-#endif 
     end do ! Loop over columns
     
     if (config%iverbose >= 3) then

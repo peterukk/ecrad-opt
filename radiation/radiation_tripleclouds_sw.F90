@@ -59,10 +59,6 @@ contains
          &                               indexed_sum, add_indexed_sum
     use radiation_matrix, only         : singlemat_x_vec, singlemat_x_vec_sw
     use radiation_two_stream, only     : calc_reflectance_transmittance_sw
-#ifdef USE_TIMING
-    ! Timing library
-    use gptl,                  only: gptlstart, gptlstop
-#endif
 
     implicit none
 
@@ -220,18 +216,12 @@ integer, parameter :: ng = NG_SW
       end do
 
       ! Compute wavelength-independent overlap matrix v_matrix
-#ifdef USE_TIMING
-    ret =  gptlstart('overlap_matrices')
-#endif 
       call calc_overlap_matrices_nocol(nlev,nregions, is_clear_sky_layer, &
       &  region_fracs(:,:,jcol), cloud%overlap_param(jcol,:), &
       &  v_matrix, decorrelation_scaling=config%cloud_inhom_decorr_scaling, &
       &  cloud_fraction_threshold=config%cloud_fraction_threshold, &
       &  use_beta_overlap=config%use_beta_overlap, &
       &  cloud_cover=flux%cloud_cover_sw(jcol))
-#ifdef USE_TIMING
-    ret =  gptlstop('overlap_matrices')
-#endif 
       ! --------------------------------------------------------
       ! Section 2: Prepare column-specific variables and arrays
       ! --------------------------------------------------------
@@ -289,19 +279,12 @@ integer, parameter :: ng = NG_SW
       ! are computed for each layer
 
       ! ...clear-sky equivalents
-#ifdef USE_TIMING
-      ret =  gptlstart('section_3')
-      ret =  gptlstart('section_3_reftrans_1')
-#endif 
-
       call calc_reflectance_transmittance_sw(ng*nlev, &
           &  mu0, od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
           &  reflectance_clear, transmittance_clear, &
           &  ref_dir_clear, trans_dir_diff_clear, &
           &  trans_dir_dir_clear )  
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3_reftrans_1')
-#endif 
+
       ! Cloudy-sky equivalents
       ! Optimized computations for cloudy sky: batch together consecutively cloudy layers
       ! For this we need the cloud boundaries i.e. top and bottom indices
@@ -406,10 +389,7 @@ integer, parameter :: ng = NG_SW
              are_clouds_below=.false.
         end if
       end do
-#ifdef USE_TIMING
-    ret =  gptlstop('section_3')
-    ret =  gptlstart('section_4')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 4: Compute total albedos
       ! --------------------------------------------------------
@@ -522,10 +502,7 @@ integer, parameter :: ng = NG_SW
         end if
 
       end do ! Reverse loop over levels
-#ifdef USE_TIMING
-    ret =  gptlstop('section_4')
-    ret =  gptlstart('section_5')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 5: Compute fluxes
       ! --------------------------------------------------------
@@ -734,9 +711,7 @@ integer, parameter :: ng = NG_SW
         end if
 
       end do ! Final loop over levels
-#ifdef USE_TIMING
-    ret =  gptlstop('section_5')
-#endif 
+
       ! Store surface spectral fluxes, if required (after the end of
       ! the final loop over levels, the current values of these arrays
       ! will be the surface values)

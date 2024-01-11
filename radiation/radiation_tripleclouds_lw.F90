@@ -57,10 +57,6 @@ contains
          &                               calc_no_scattering_transmittance_lw
     use radiation_adding_ica_lw, only  : adding_ica_lw, calc_fluxes_no_scattering_lw
     use radiation_lw_derivatives, only : calc_lw_derivatives_region
-#ifdef USE_TIMING
-    ! Timing library
-    use gptl,                  only: gptlstart, gptlstop
-#endif
     implicit none
 
 ! Allow size of inner dimension (number of g-points) to be known at compile time if NG_LW is defined
@@ -251,13 +247,7 @@ contains
       ! --------------------------------------------------------
       ! Section 3: Clear-sky calculation
       ! --------------------------------------------------------
-#ifdef USE_TIMING
-     ret =  gptlstart('section_3_lw')
-#endif 
       if (.not. config%do_lw_aerosol_scattering) then
-#ifdef USE_TIMING
-     ret =  gptlstart('section_3_lw_noscat')
-#endif 
         ! No scattering in clear-sky flux calculation
         call calc_no_scattering_transmittance_lw(ng*nlev, od(:,:,jcol), &
         &  planck_hl(:,1:nlev,jcol), planck_hl(:,2:nlev+1,jcol), &
@@ -269,9 +259,6 @@ contains
              &  trans_clear, source_up_clear, source_dn_clear, &
              &  emission(:,jcol), albedo(:,jcol), &
              &  flux_up_clear, flux_dn_clear)
-#ifdef USE_TIMING
-     ret =  gptlstop('section_3_lw_noscat')
-#endif 
 
       else
         ! Do LW aerosol scattering
@@ -319,10 +306,7 @@ contains
           end do
         end if
       end if
-#ifdef USE_TIMING
-     ret =  gptlstop('section_3_lw')
-     ret =  gptlstart('section_4_lw')
-#endif 
+
       ! --------------------------------------------------------
       ! Section 4: Loop over cloudy layers to compute reflectance and transmittance
       ! --------------------------------------------------------
@@ -407,8 +391,6 @@ contains
   
           end do
 
-    !  ret =  gptlstart('section_4_lw_reftrans')
-
           if (config%do_lw_cloud_scattering) then
             call calc_reflectance_transmittance_lw(ng*2, &
             &  od_total(:,2:nregions), ssa_total(:,2:nregions), g_total(:,2:nregions), &
@@ -426,7 +408,6 @@ contains
 
             reflectance(:,2:nregions, jlev) = 0.0_jprb
           end if
-          ! ret =  gptlstop('section_4_lw_reftrans')
 
           ! Emission is scaled by the size of each region
           do jreg = 2,nregions
@@ -439,15 +420,10 @@ contains
         end if
       end do
 
-#ifdef USE_TIMING
-     ret =  gptlstop('section_4_lw')
-#endif 
       ! --------------------------------------------------------
       ! Section 5: Compute total sources and albedos at each half level
       ! --------------------------------------------------------
-#ifdef USE_TIMING
-     ret =  gptlstart('section_5-7_lw')
-#endif 
+
       total_albedo(:,:,i_cloud_top:nlev+1) = 0.0_jprb
 
       ! Calculate the upwelling radiation emitted by the surface, and
@@ -576,15 +552,10 @@ contains
         end if
       end do
 
-#ifdef USE_TIMING
-     ret =  gptlstop('section_5-7_lw')
-#endif 
       ! --------------------------------------------------------
       ! Section 8: Compute fluxes down to surface
       ! --------------------------------------------------------
-#ifdef USE_TIMING
-     ret =  gptlstart('section_8_lw')
-#endif 
+
       ! Copy over downwelling spectral fluxes at top of first
       ! scattering layer, using overlap matrix to translate to the
       ! regions of the first layer of cloud
@@ -672,22 +643,13 @@ contains
       ! Compute the longwave derivatives needed by Hogan and Bozzo
       ! (2015) approximate radiation update scheme
       if (config%do_lw_derivatives) then
-#ifdef USE_TIMING
-     ret =  gptlstart('section_8_lw_derivatives')
-#endif 
         ! Note that at this point flux_up contains the spectral
         ! fluxes into the regions of the lowest layer; we sum over
         ! regions first to provide a simple spectral flux upwelling
         ! from the surface
         call calc_lw_derivatives_region(ng, nlev, nregions, jcol, transmittance, &
              &  u_matrix(:,:,:), sum(flux_up,2), flux%lw_derivatives)
-#ifdef USE_TIMING
-     ret =  gptlstop('section_8_lw_derivatives')
-#endif 
       end if
-#ifdef USE_TIMING
-     ret =  gptlstop('section_8_lw')
-#endif 
 
     end do ! Loop over columns
 
