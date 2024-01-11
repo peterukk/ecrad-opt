@@ -11,8 +11,8 @@ CHANGENAM = ../common/change_namelist.sh
 #CONFIG = configCY43R3.nam
 #CONFIG = configCY46R1.nam
 #CONFIG = configCY47R1.nam
-#CONFIG = configCY47R3.nam
-CONFIG = configCY49R1.nam
+CONFIG = configCY47R3.nam
+#CONFIG = configCY49R1.nam
 CONFIG_ECCKD = configCY49R1_ecckd.nam
 CONFIG_RRTMGP = configRRTMGP.nam
 
