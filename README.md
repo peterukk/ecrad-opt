@@ -16,6 +16,10 @@ To learn how to produce the timings in the paper [see test/ifs-bigrand/README.md
 The implementation, development and testing of RRTMGP-NN is described 
 in [a GMD paper](https://doi.org/10.5194/egusphere-2022-1047).
 
+If you just want the refactored code use the clean_no_opt_testing branch - that branch is more actively maintained! 
+This branch with testable optimizations is by design not kept up to date with the official ecRad repo, which as of Jan 2024 has incorporated
+many of the optimizations described in the paper (but not all, for instance the cloudy layer batching to further improve vectorization).
+
 ----------------------------------------------------------------------
 
 For more complete information about compilation and usage of ecRad,
