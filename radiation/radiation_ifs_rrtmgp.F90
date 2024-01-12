@@ -38,7 +38,9 @@ contains
     use parkind1,         only : jprb
     use yomhook,          only : lhook, dr_hook, jphook
     use radiation_io,     only : nulerr, radiation_abort    
-    use radiation_config, only : config_type, IGasModelRRTMGP_NN, ISolverSPARTACUS
+    use radiation_config, only : config_type, IGasModelRRTMGP_NN,IGasModelRRTMGP, ISolverSPARTACUS
+    use radiation_spectral_definition, only &
+         &  : SolarReferenceTemperature, TerrestrialReferenceTemperature
     use mo_load_coefficients,     only:   load_and_init
     use mo_gas_concentrations,    only :  ty_gas_concs
     use mo_gas_optics_rrtmgp,     only :  ty_gas_optics_rrtmgp
@@ -89,85 +91,94 @@ contains
     call load_and_init(config%k_dist_lw, trim(config%rrtmgp_gas_optics_file_name_lw), config%rrtmgp_gas_names)
     call load_and_init(config%k_dist_sw, trim(config%rrtmgp_gas_optics_file_name_sw), config%rrtmgp_gas_names)
 
-    if (config%i_gas_model == IGasModelRRTMGP_NN) use_neural_nets = .true.
-    ! Load neural network models if needed
-    if (use_neural_nets) then
+    ! Cloud and aerosol properties can only be defined per band
+    if (config%i_gas_model_sw == IGasModelRRTMGP_NN .or. config%i_gas_model_sw == IGasModelRRTMGP) then
+      config%do_cloud_aerosol_per_sw_g_point = .false.
+      config%n_g_sw = config%k_dist_sw%get_ngpt()
+
+      ! Store band positions if using generalized cloud or aerosol
+      ! Read from the RRTMGP k-distribution derived type
+      call config%gas_optics_sw%spectral_def%allocate_bands_only( SolarReferenceTemperature, &
+          & config%k_dist_sw%band_lims_wvn(1,:), config%k_dist_sw%band_lims_wvn(2,:))
+
+      config%i_band_from_g_sw =  config%k_dist_sw%get_gpoint_bands() 
+      config%n_bands_sw = config%k_dist_sw%get_nband()
+      allocate(config%i_band_from_reordered_g_sw(config%n_g_sw))
+      allocate(config%i_g_from_reordered_g_sw(config%n_g_sw))
+
+      ! if (config%i_solver_sw == ISolverSpartacus) then
+      !      ! SPARTACUS requires g points ordered in approximately
+      !      ! increasing order of optical depth
+      !      config%i_g_from_reordered_g_sw = RRTMGP_GPOINT_REORDERING_SW_224
+      ! else
+          ! Implied-do for no reordering
+        config%i_g_from_reordered_g_sw = (/ (irep, irep=1,config%n_g_sw) /)
+        ! end if
+
+        config%i_band_from_reordered_g_sw &
+              & = config%i_band_from_g_sw(config%i_g_from_reordered_g_sw)
+    end if
+
+
+    if (config%i_gas_model_lw == IGasModelRRTMGP_NN .or. config%i_gas_model_lw == IGasModelRRTMGP) then
+      config%do_cloud_aerosol_per_lw_g_point = .false.
+      config%n_g_lw = config%k_dist_lw%get_ngpt()
+
+      call config%gas_optics_lw%spectral_def%allocate_bands_only( TerrestrialReferenceTemperature, &
+      & config%k_dist_lw%band_lims_wvn(1,:), config%k_dist_lw%band_lims_wvn(2,:))
+
+      config%i_band_from_g_lw =  config%k_dist_lw%get_gpoint_bands() 
+      config%n_bands_lw = config%k_dist_lw%get_nband()
+      allocate(config%i_band_from_reordered_g_lw(config%n_g_lw))
+      allocate(config%i_g_from_reordered_g_lw(config%n_g_lw))
+
+      if (config%i_solver_lw == ISolverSpartacus) then
+        ! SPARTACUS requires g points ordered in approximately
+        ! increasing order of optical depth
+        if (config%n_g_lw == 256) then
+          config%i_g_from_reordered_g_lw = RRTMGP_GPOINT_REORDERING_LW_256
+        else 
+          write(nulerr,'(a)') '*** Error in setup_gas_optics_ifs_rrtmgp: SPARTACUS reordering missing for this LW k-distribution'
+          call radiation_abort()
+        end if
+      else
+        ! Implied-do for no reordering
+        config%i_g_from_reordered_g_lw = (/ (irep, irep=1,config%n_g_lw) /)
+      end if
+
+      config%i_band_from_reordered_g_lw &
+            & = config%i_band_from_g_lw(config%i_g_from_reordered_g_lw)
+    end if
+
+
+    if (config%i_gas_model_sw == IGasModelRRTMGP_NN) then
         call config%rrtmgp_neural_nets(1) % load_netcdf(trim(config%rrtmgp_neural_net_sw_tau))
         call config%rrtmgp_neural_nets(2) % load_netcdf(trim(config%rrtmgp_neural_net_sw_ray))
+        if (config%n_g_sw /= size(config%rrtmgp_neural_nets(1)%coeffs_output_mean)) then 
+          write(nulerr,'(a,i0,a,i0)') '*** Error in setup_gas_optics_ifs_rrtmgp: NN n_g_sw of ', &
+              & config%n_g_sw, ' doesnt match the LUT ng:', size(config%rrtmgp_neural_nets(1)%coeffs_output_mean)
+          call radiation_abort()
+        end if 
+    end if 
+    if (config%i_gas_model_lw == IGasModelRRTMGP_NN) then
         call config%rrtmgp_neural_nets(3) % load_netcdf(trim(config%rrtmgp_neural_net_lw))
         ! call config%rrtmgp_neural_nets(3) % load_netcdf(trim(config%rrtmgp_neural_net_lw_tau))
         ! call config%rrtmgp_neural_nets(4) % load_netcdf(trim(config%rrtmgp_neural_net_lw_pfrac))
+        if (.not. config%n_g_lw == size(config%rrtmgp_neural_nets(3)%coeffs_output_mean)/2 .or. &
+        config%n_g_lw == size(config%rrtmgp_neural_nets(3)%coeffs_output_mean)) then 
+         write(nulerr,'(a,i0,a,i0)') '*** Error in setup_gas_optics_ifs_rrtmgp: NN ng_lw of ', &
+              & config%n_g_lw, ' doesnt match the LUT ng:', size(config%rrtmgp_neural_nets(3)%coeffs_output_mean)
+        call radiation_abort()
+      end if 
+    end if
+
+    if (config%i_gas_model_sw == IGasModelRRTMGP_NN .or. config%i_gas_model_lw == IGasModelRRTMGP_NN ) then 
+      use_neural_nets = .true.
     end if
 
     ! Scale the spectral solar source function with user-provided solar irradiance
     ! REMOVED - now done within the gas optics call
     ! call stop_on_err(config%k_dist_sw%set_tsi(solar_irradiance ))
-
-    ! Cloud and aerosol properties can only be defined per band
-    config%do_cloud_aerosol_per_sw_g_point = .false.
-    config%do_cloud_aerosol_per_lw_g_point = .false.
-
-    config%n_g_sw = config%k_dist_sw%get_ngpt()
-    config%n_g_lw = config%k_dist_lw%get_ngpt()
-
-    if (use_neural_nets) then
-     if (config%n_g_sw /= size(config%rrtmgp_neural_nets(1)%coeffs_output_mean)) then 
-       write(nulerr,'(a)') '*** Error in setup_gas_optics_ifs_rrtmgp: NN n_g_sw doesnt match the LUT'
-       call radiation_abort()
-     end if 
-
-     if (.not. config%n_g_lw == size(config%rrtmgp_neural_nets(3)%coeffs_output_mean)/2 .or. &
-       config%n_g_lw == size(config%rrtmgp_neural_nets(3)%coeffs_output_mean)) then 
-       write(nulerr,'(a)') '*** Error in setup_gas_optics_ifs_rrtmgp: NN n_g_lw doesnt match the LUT'
-       call radiation_abort()
-     end if 
-    end if
-    ! Store band positions if using generalized cloud or aerosol
-    ! Read from the RRTMGP k-distribution derived type
-    call config%gas_optics_sw%spectral_def%allocate_bands_only( &
-        & config%k_dist_sw%band_lims_wvn(1,:), config%k_dist_sw%band_lims_wvn(2,:))
-    call config%gas_optics_lw%spectral_def%allocate_bands_only( &
-        & config%k_dist_lw%band_lims_wvn(1,:), config%k_dist_lw%band_lims_wvn(2,:))
-
-    config%i_band_from_g_sw =  config%k_dist_sw%get_gpoint_bands() 
-    config%i_band_from_g_lw =  config%k_dist_lw%get_gpoint_bands() 
-
-    config%n_bands_sw = config%k_dist_sw%get_nband()
-    config%n_bands_lw = config%k_dist_lw%get_nband()
-
-    allocate(config%i_band_from_reordered_g_sw(config%n_g_sw))
-    allocate(config%i_band_from_reordered_g_lw(config%n_g_lw))
-    allocate(config%i_g_from_reordered_g_sw(config%n_g_sw))
-    allocate(config%i_g_from_reordered_g_lw(config%n_g_lw))
-
-    ! if (config%i_solver_sw == ISolverSpartacus) then
-    !      ! SPARTACUS requires g points ordered in approximately
-    !      ! increasing order of optical depth
-    !      config%i_g_from_reordered_g_sw = RRTMGP_GPOINT_REORDERING_SW_224
-    ! else
-        ! Implied-do for no reordering
-        config%i_g_from_reordered_g_sw = (/ (irep, irep=1,config%n_g_sw) /)
-    ! end if
-
-    if (config%i_solver_lw == ISolverSpartacus) then
-      ! SPARTACUS requires g points ordered in approximately
-      ! increasing order of optical depth
-      if (config%n_g_lw == 256) then
-        config%i_g_from_reordered_g_lw = RRTMGP_GPOINT_REORDERING_LW_256
-      else 
-        write(nulerr,'(a)') '*** Error in setup_gas_optics_ifs_rrtmgp: SPARTACUS reordering missing for this LW k-distribution'
-        call radiation_abort()
-      end if
-    else
-      ! Implied-do for no reordering
-      config%i_g_from_reordered_g_lw = (/ (irep, irep=1,config%n_g_lw) /)
-    end if
-
-    config%i_band_from_reordered_g_sw &
-          & = config%i_band_from_g_sw(config%i_g_from_reordered_g_sw)
-
-    config%i_band_from_reordered_g_lw &
-          & = config%i_band_from_g_lw(config%i_g_from_reordered_g_lw)
 
     ! The i_spec_* variables are used solely for storing spectral
     ! data, and this can either be by band or by g-point
@@ -216,10 +227,11 @@ contains
 
     use parkind1,                 only : jprb, jpim
     use yomhook,                  only : lhook, dr_hook, jphook
-    use radiation_config,         only : config_type, ISolverSpartacus, IGasModelRRTMGP_NN
+    use radiation_config,         only : config_type, ISolverSpartacus, IGasModelRRTMGP, IGasModelRRTMGP_NN
     use radiation_thermodynamics, only : thermodynamics_type
     use radiation_single_level,   only : single_level_type
     use radiation_gas
+    use radiation_io,     only : nulerr, radiation_abort     
     use mo_gas_optics_rrtmgp,  only: ty_gas_optics_rrtmgp
     use mo_gas_concentrations,    only: ty_gas_concs
     use radiation_gas_constants
@@ -265,14 +277,16 @@ contains
     real(jprb) :: solar_src_tmp(config%n_g_sw), norm
 
     integer :: ret, jcol, jlev, igpt, ncol_loc, jgas
-
+    logical :: is_volume_mixing_ratio
     logical :: use_neural_nets =.false.
 
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_ifs_rrtmgp:gas_optics',0,hook_handle)
    
-    if (config%i_gas_model == IGasModelRRTMGP_NN) use_neural_nets = .true.
+    if (config%i_gas_model_sw == IGasModelRRTMGP_NN .or. config%i_gas_model_lw == IGasModelRRTMGP_NN ) then 
+      use_neural_nets = .true.
+    end if
 
     ncol_loc = iendcol-istartcol+1
 
@@ -298,6 +312,18 @@ contains
     temperature_hl = min(config%k_dist_lw%get_temp_max(), temperature_hl)
     temperature_fl = max(config%k_dist_lw%get_temp_min(), temperature_fl)
     temperature_fl = min(config%k_dist_lw%get_temp_max(), temperature_fl)
+
+    ! Check that the gas concentrations are stored in volume mixing
+    ! ratio with no scaling; if not, return a vector of scalings
+    call gas%assert_units(IVolumeMixingRatio, scale_factor=1.0_jprb, &
+         &                istatus=is_volume_mixing_ratio)
+    if (.not. is_volume_mixing_ratio) then
+      write(nulerr,'(a)') '*** RRTMGP requires volume mixing ratios, mixing it with another gas optics not supported'
+      call radiation_abort()
+    !   call gas%get_scaling(IVolumeMixingRatio, concentration_scaling)
+    ! else
+    !   concentration_scaling = 1.0_jprb
+    end if  
 
     ! Initialize RRTMGP gas derived type
     call stop_on_err(gas_rrtmgp%init(config%rrtmgp_gas_names))
@@ -325,7 +351,8 @@ contains
     !   print *, "max of rrtmgp gas ", gas_rrtmgp%gas_name(jgas), ":", maxval(gas_rrtmgp%concs(jgas)%conc)
     ! end do
 
-    if (config%do_sw) then
+    if (config%do_sw .and. (config%i_gas_model_sw == IGasModelRRTMGP .or. &
+        &   config%i_gas_model_sw == IGasModelRRTMGP_NN)) then
 
       if (use_neural_nets) then
         call stop_on_err(config%k_dist_sw%gas_optics_ext_ecrad( &
@@ -364,7 +391,8 @@ contains
 
     end if
 
-    if (config%do_lw) then
+    if (config%do_lw .and. (config%i_gas_model_lw == IGasModelRRTMGP .or. &
+        &   config%i_gas_model_lw == IGasModelRRTMGP_NN)) then
         if (use_neural_nets) then
           call stop_on_err(config%k_dist_lw%gas_optics_int_ecrad( &
               &   ncol_loc, nlev, config%n_g_lw, &

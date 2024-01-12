@@ -58,7 +58,7 @@ contains
     use radiation_flux, only           : flux_type, &
          &                               indexed_sum, add_indexed_sum
     use radiation_matrix, only         : singlemat_x_vec, singlemat_x_vec_sw
-    use radiation_two_stream, only     : calc_reflectance_transmittance_sw
+    use radiation_two_stream, only     : calc_ref_trans_sw
 
     implicit none
 
@@ -279,7 +279,7 @@ integer, parameter :: ng = NG_SW
       ! are computed for each layer
 
       ! ...clear-sky equivalents
-      call calc_reflectance_transmittance_sw(ng*nlev, &
+      call calc_ref_trans_sw(ng*nlev, &
           &  mu0, od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
           &  reflectance_clear, transmittance_clear, &
           &  ref_dir_clear, trans_dir_diff_clear, &
@@ -367,7 +367,7 @@ integer, parameter :: ng = NG_SW
           end do
         end do
 
-        call calc_reflectance_transmittance_sw(ng*2*nlev_cloud, &
+        call calc_ref_trans_sw(ng*2*nlev_cloud, &
            &  mu0, od_tot_batch, ssa_tot_batch, g_tot_batch, &
            &  reflectance(:,:,jtop:jbot), transmittance(:,:,jtop:jbot), &
            &  ref_dir(:,:,jtop:jbot), trans_dir_diff(:,:,jtop:jbot), trans_dir_dir(:,:,jtop:jbot))
@@ -709,9 +709,8 @@ integer, parameter :: ng = NG_SW
                  &           flux%sw_dn_clear_band(:,jcol,jlev+1))
           end if
         end if
-
       end do ! Final loop over levels
-
+      
       ! Store surface spectral fluxes, if required (after the end of
       ! the final loop over levels, the current values of these arrays
       ! will be the surface values)

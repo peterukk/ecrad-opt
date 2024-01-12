@@ -40,7 +40,7 @@ contains
     use radiation_cloud, only          : cloud_type
     use radiation_flux, only           : flux_type, indexed_sum_profile
     use radiation_two_stream, only     : calc_two_stream_gammas_lw, &
-         &                               calc_reflectance_transmittance_lw, &
+         &                               calc_ref_trans_lw, &
          &                               calc_no_scattering_transmittance_lw
     use radiation_adding_ica_lw, only  : adding_ica_lw, calc_fluxes_no_scattering_lw
     use radiation_lw_derivatives, only : calc_lw_derivatives_ica
@@ -144,7 +144,7 @@ contains
             g_total   = g(:,jlev,jcol)
             call calc_two_stream_gammas_lw(ng, ssa_total, g_total, &
                  &  gamma1, gamma2)
-            call calc_reflectance_transmittance_lw(ng, &
+            call calc_ref_trans_lw(ng, &
                  &  od(:,jlev,jcol), gamma1, gamma2, &
                  &  planck_hl(:,jlev,jcol), planck_hl(:,jlev+1,jcol), &
                  &  reflectance(:,jlev), transmittance(:,jlev), &
@@ -243,7 +243,7 @@ contains
               ! each model level
               call calc_two_stream_gammas_lw(ng, ssa_total, g_total, &
                    &  gamma1, gamma2)
-              call calc_reflectance_transmittance_lw(ng, &
+              call calc_ref_trans_lw(ng, &
                    &  od_total, gamma1, gamma2, &
                    &  planck_hl(:,jlev,jcol), planck_hl(:,jlev+1,jcol), &
                    &  reflectance(:,jlev), transmittance(:,jlev), &

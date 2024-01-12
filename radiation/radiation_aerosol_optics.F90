@@ -18,6 +18,8 @@
 !   2022-03-27  R. Hogan  Add setup_general_aerosol_optics_legacy to use RRTM aerosol files with ecCKD
 !   2022-11-22  P. Ukkonen / R. Hogan  Optimizations to enhance vectorization
 
+#include "ecrad_config.h"
+
 module radiation_aerosol_optics
 
   implicit none
@@ -95,7 +97,11 @@ contains
 
     use parkind1,                      only : jprb
     use yomhook,                       only : lhook, dr_hook, jphook
+#ifdef EASY_NETCDF_READ_MPI
+    use easy_netcdf_read_mpi,          only : netcdf_file
+#else
     use easy_netcdf,                   only : netcdf_file
+#endif
     use radiation_config,              only : config_type
     use radiation_aerosol_optics_data, only : aerosol_optics_type
     use radiation_spectral_definition, only : SolarReferenceTemperature, &
@@ -340,7 +346,11 @@ contains
 
     use parkind1,                      only : jprb
     use yomhook,                       only : lhook, dr_hook, jphook
+#ifdef EASY_NETCDF_READ_MPI
+    use easy_netcdf_read_mpi,          only : netcdf_file
+#else
     use easy_netcdf,                   only : netcdf_file
+#endif
     use radiation_config,              only : config_type
     use radiation_aerosol_optics_data, only : aerosol_optics_type
     use radiation_spectral_definition, only : SolarReferenceTemperature, &
@@ -580,10 +590,6 @@ contains
     real(jprb), allocatable :: one_minus_ao_ssa_lw_philic(:,:,:), one_minus_ao_ssa_lw_phobic(:,:)
     real(jprb) :: one_over_accel
     
-#ifdef USE_TIMING
-    ! Timing library
-    integer :: ret
-#endif
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('radiation_aerosol_optics:add_aerosol_optics',0,hook_handle)

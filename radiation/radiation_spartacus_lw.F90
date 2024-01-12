@@ -72,7 +72,7 @@ contains
     use radiation_overlap,        only : calc_overlap_matrices_nocol
     use radiation_flux,           only : flux_type, indexed_sum
     use radiation_matrix
-    use radiation_two_stream,     only : calc_reflectance_transmittance_lw, & 
+    use radiation_two_stream,     only : calc_ref_trans_lw, & 
         & calc_no_scattering_transmittance_lw, LwDiffusivityWP, calc_two_stream_gammas_lw
     use radiation_lw_derivatives, only : calc_lw_derivatives_matrix
     use radiation_constants,      only : Pi, GasConstantDryAir, AccelDueToGravity
@@ -290,9 +290,6 @@ contains
        & source_up_tmp, source_dn_tmp
     integer, dimension(:,:), allocatable :: inds
     integer :: jtop, jbot, nlev_cld, j1, j2, ng3D_tot, ng_batch_limit
-#ifdef USE_TIMING
-    integer :: ret
-#endif
 
     real(jphook) :: hook_handle
 
@@ -457,7 +454,7 @@ contains
       ! to the coupled ODEs for the sources.
 
       if (config%do_lw_aerosol_scattering) then
-        call calc_reflectance_transmittance_lw(ng*nlev, &
+        call calc_ref_trans_lw(ng*nlev, &
             &  od_region_clear, ssa_clear, g_clear, &
             &  planck_hl(:,1:nlev,jcol), planck_hl(:,2:nlev+1,jcol), &
             &  ref_clear, trans_clear, &
@@ -636,7 +633,7 @@ contains
             ! formulas for reflectance and transmittance, and equivalent
             ! solutions to the coupled ODEs for the sources.
             do jreg = 2, nreg
-              call calc_reflectance_transmittance_lw(ng-ng3D, &
+              call calc_ref_trans_lw(ng-ng3D, &
                   &  od_region_cld(ng3D+1:ng,jreg,jlev), &
                   &  ssa_region_cld(ng3D+1:ng,jreg,jlev), g_region_cld(ng3D+1:ng,jreg,jlev), &
                   ! array temps are created for the next two arguments

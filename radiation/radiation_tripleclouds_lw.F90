@@ -53,7 +53,7 @@ contains
     use radiation_overlap, only        : calc_overlap_matrices_nocol
     use radiation_flux, only           : flux_type, indexed_sum
     use radiation_matrix, only         : singlemat_x_vec, singlemat_x_vec_lw
-    use radiation_two_stream, only     : calc_reflectance_transmittance_lw, &
+    use radiation_two_stream, only     : calc_ref_trans_lw, &
          &                               calc_no_scattering_transmittance_lw
     use radiation_adding_ica_lw, only  : adding_ica_lw, calc_fluxes_no_scattering_lw
     use radiation_lw_derivatives, only : calc_lw_derivatives_region
@@ -248,7 +248,9 @@ contains
       ! Section 3: Clear-sky calculation
       ! --------------------------------------------------------
       if (.not. config%do_lw_aerosol_scattering) then
-        ! No scattering in clear-sky flux calculation
+        ! No scattering in clear-sky flux calculation; note that here
+        ! the first two dimensions of the input arrays are unpacked
+        ! into vectors inside the routine  
         call calc_no_scattering_transmittance_lw(ng*nlev, od(:,:,jcol), &
         &  planck_hl(:,1:nlev,jcol), planck_hl(:,2:nlev+1,jcol), &
         &  trans_clear, source_up_clear, source_dn_clear)
@@ -261,13 +263,12 @@ contains
              &  flux_up_clear, flux_dn_clear)
 
       else
-        ! Do LW aerosol scattering
-        call calc_reflectance_transmittance_lw(ng*nlev, &
+        ! Scattering in clear-sky flux calculation
+        call calc_ref_trans_lw(ng*nlev, &
             &  od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
             &  planck_hl(:,1:nlev,jcol), planck_hl(:,2:nlev+1,jcol), &
             &  ref_clear, trans_clear, &
             &  source_up_clear, source_dn_clear)
-
         ! Use adding method to compute fluxes
         call adding_ica_lw(ng, nlev, &
              &  ref_clear, trans_clear, source_up_clear, source_dn_clear, &
@@ -292,8 +293,11 @@ contains
           flux%lw_dn_clear(jcol,jlev) = sums_dn
        end do
 
-        ! Store surface spectral downwelling fluxes
-        flux%lw_dn_surf_clear_g(:,jcol) = flux_dn_clear(:,nlev+1)
+        ! Store surface spectral downwelling fluxes / TOA upwelling
+        do jg = 1,ng
+          flux%lw_dn_surf_clear_g(jg,jcol) = flux_dn_clear(jg,nlev+1)
+          flux%lw_up_toa_clear_g (jg,jcol) = flux_up_clear(jg,1)
+        end do
         ! Save the spectral fluxes if required
         if (config%do_save_spectral_flux) then
           do jlev = 1,nlev+1
@@ -392,7 +396,7 @@ contains
           end do
 
           if (config%do_lw_cloud_scattering) then
-            call calc_reflectance_transmittance_lw(ng*2, &
+            call calc_ref_trans_lw(ng*2, &
             &  od_total(:,2:nregions), ssa_total(:,2:nregions), g_total(:,2:nregions), &
             &  planck_hl_top(:,2:nregions), planck_hl_bot(:,2:nregions), &
             &  reflectance(:,2:nregions,jlev), transmittance(:,2:nregions,jlev), &
@@ -551,6 +555,7 @@ contains
           flux%lw_dn(jcol,:) = sum(flux_dn_clear(:,jlev))
         end if
       end do
+      flux%lw_up_toa_g(:,jcol) = sum(flux_up,2)
 
       ! --------------------------------------------------------
       ! Section 8: Compute fluxes down to surface

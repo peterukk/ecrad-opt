@@ -801,9 +801,14 @@ contains
 
     ! ---- FOR RRTMGP ----
     ! RRTMGP uses its own derived type for gases, which can be written inside the gas optics,
-    ! but we need to know the gas names before that, when k-distributions are loaded (during setup)
-    ! RRTMGP gases are whatever gases are in GasLowerCaseName *and* present, plus N2
-    if (config%i_gas_model == IGasModelRRTMGP .or. config%i_gas_model == IGasModelRRTMGP_NN) then
+    ! but we need to know the gas names before that when k-distributions are loaded (during setup)
+    ! The RRTMGP gases enabled are those found in GasLowerCaseName *and* actually 
+    ! present (provided), plus Nitrogen (N2) - this one is assumed to be missing from the provided
+    ! gases and set to 0.7810 in RRTMGP's ecRad interface during the radiation call
+    if (config%i_gas_model_sw == IGasModelRRTMGP .or. &
+        & config%i_gas_model_sw == IGasModelRRTMGP_NN .or. &
+        & config%i_gas_model_lw == IGasModelRRTMGP .or. &
+        & config%i_gas_model_lw == IGasModelRRTMGP_NN) then
       gas_inds = [1] ! H2O is assumed to always be present 
       do jgas = 2,NMaxGases
           ! print *, "gasname ", trim(GasLowerCaseName(jgas))

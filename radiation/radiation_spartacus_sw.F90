@@ -92,8 +92,8 @@ contains
          &                               indexed_sum, add_indexed_sum
     use radiation_matrix
     use radiation_two_stream, only     : calc_two_stream_gammas_sw, &
-         & calc_reflectance_transmittance_sw, &
-         &  calc_reflectance_transmittance_sw, calc_frac_scattered_diffuse_sw, &
+         & calc_ref_trans_sw, &
+         &  calc_ref_trans_sw, calc_frac_scattered_diffuse_sw, &
          &  SwDiffusivity
     use radiation_constants, only      : Pi, GasConstantDryAir, AccelDueToGravity
 
@@ -328,9 +328,6 @@ contains
          &         od_region_cld, ssa_region_cld, g_region_cld,      &  
          &         gamma1_cld, gamma2_cld, gamma3_cld    
     integer :: jtop, jbot, nlev_cld, nlev_cld_limit
-#ifdef USE_TIMING
-    integer :: ret
-#endif
 
     if (lhook) call dr_hook('radiation_spartacus_sw:solver_spartacus_sw',0,hook_handle)
 
@@ -557,7 +554,7 @@ contains
       ! 1. Reftrans computations for clear-sky-region : these are done for all layers, also for cloudy layers
       od_region_clear = od(:,:,jcol)
 
-      call calc_reflectance_transmittance_sw(ng*nlev, &
+      call calc_ref_trans_sw(ng*nlev, &
           &  mu0, od_region_clear, ssa(:,:,jcol), g(:,:,jcol), &
           &  ref_clear, trans_clear, ref_dir_clear, trans_dir_diff_clear, trans_dir_dir_clear, &
           &  gamma1_clear, gamma2_clear, gamma3_clear)
@@ -978,22 +975,22 @@ contains
           !  B=C*D, then solve AX=B, finally Y = Z*X
           associate(B1=>total_albedo_below, B2=>total_albedo_below_direct, X=>tmp)
 
-          call mat_x_mat_3_sw(ng,&                            		! 1. B = C*D
-              &  total_albedo(:,:,:,jlev+1), transmittance(:,:,:,jlev), B1) 			
-          call solve_mat_3_sw(ng,denominator, B1, X)           		! 2. solve AX=B
+          call mat_x_mat_3_sw(ng,&                                ! 1. B = C*D
+              & total_albedo(:,:,:,jlev+1), transmittance(:,:,:,jlev), B1)
+          call solve_mat_3_sw(ng,denominator, B1, X)              ! 2. solve AX=B
           call mat_x_mat_3_sw(ng, transmittance(:,:,:,jlev), X, & ! 3. Y = Z*X ...
               & total_albedo_below)
           total_albedo_below = total_albedo_below + reflectance(:,:,:,jlev) ! + R
 
           ! Direct
-          call mat_x_mat_3_sw(ng, &                           		! 1. B = C1*D1 ...
+          call mat_x_mat_3_sw(ng, &                               ! 1. B = C1*D1 ...
               &  total_albedo_direct(:,:,:,jlev+1), trans_dir_dir(:,:,:,jlev), X)
-          call mat_x_mat_3_sw(ng, &                        				! + C2+D3
+          call mat_x_mat_3_sw(ng, &                               ! + C2+D3
               & total_albedo(:,:,:,jlev+1), trans_dir_diff(:,:,:,jlev), B2)
-          B2 = X + B2		
-          call solve_mat_3_sw(ng,denominator,B2, X)           		! 2. solve AX=B
-          call mat_x_mat_3_sw(ng,transmittance(:,:,:,jlev),X,B2) 	! Z*X
-          total_albedo_below_direct = ref_dir(:,:,:,jlev) + B2 		! 3. Y = R + Z*X
+          B2 = X + B2
+          call solve_mat_3_sw(ng,denominator,B2, X)               ! 2. solve AX=B
+          call mat_x_mat_3_sw(ng,transmittance(:,:,:,jlev),X,B2)  ! Z*X
+          total_albedo_below_direct = ref_dir(:,:,:,jlev) + B2    ! 3. Y = R + Z*X
 
           end associate
         end if

@@ -37,7 +37,7 @@ contains
     use radiation_flux, only           : flux_type, indexed_sum_profile, &
          &                               add_indexed_sum_profile
     use radiation_two_stream, only     : calc_two_stream_gammas_sw, &
-         &                       calc_reflectance_transmittance_sw
+         &                       calc_ref_trans_sw
     use radiation_constants, only      : Pi, GasConstantDryAir, &
          &                               AccelDueToGravity
     use radiation_adding_ica_sw, only  : adding_ica_sw
@@ -117,7 +117,7 @@ contains
             call calc_two_stream_gammas_sw(ng, cos_sza, &
                  &  ssa(:,jlev,jcol), g(:,jlev,jcol), &
                  &  gamma1, gamma2, gamma3)
-            call calc_reflectance_transmittance_sw(ng, &
+            call calc_ref_trans_sw(ng, &
                  &  cos_sza, &
                  &  od(:,jlev,jcol), ssa(:,jlev,jcol), &
                  &  gamma1, gamma2, gamma3, &
@@ -135,7 +135,7 @@ contains
             call calc_two_stream_gammas_sw(ng, &
                  &  cos_sza, ssa_total, g_total, &
                  &  gamma1, gamma2, gamma3)
-            call calc_reflectance_transmittance_sw(ng, &
+            call calc_ref_trans_sw(ng, &
                  &  cos_sza, od_total, ssa_total, &
                  &  gamma1, gamma2, gamma3, &
                  &  reflectance(:,jlev), transmittance(:,jlev), &

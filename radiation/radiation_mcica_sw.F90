@@ -18,6 +18,8 @@
 !   2017-10-23  R. Hogan  Renamed single-character variables
 !   2022-05-12  P. Ukkonen Optimized reflectance-transmittance and broadband flux
 
+#include "ecrad_config.h"
+
 module radiation_mcica_sw
 
   public
@@ -51,8 +53,7 @@ contains
     use radiation_single_level, only   : single_level_type
     use radiation_cloud, only          : cloud_type
     use radiation_flux, only           : flux_type
-    use radiation_two_stream, only     : calc_two_stream_gammas_sw, &
-         &                               calc_reflectance_transmittance_sw, calc_reflectance_transmittance_sw
+    use radiation_two_stream, only     : calc_ref_trans_sw
     use radiation_adding_ica_sw, only  : adding_ica_sw
     use radiation_cloud_generator, only: cloud_generator
 
@@ -110,9 +111,6 @@ contains
     ! Combined scattering optical depth
     real(jprb) :: scat_od
 
-    ! Two-stream coefficients
-    real(jprb), dimension(config%n_g_sw) :: gamma1, gamma2, gamma3
-
     ! Optical depth scaling from the cloud generator, zero indicating
     ! clear skies
     real(jprb), dimension(config%n_g_sw,nlev) :: od_scaling
@@ -124,11 +122,11 @@ contains
     ! Total cloud cover output from the cloud generator
     real(jprb) :: total_cloud_cover
 
-    ! Faster broadband flux computation 
-#ifdef __NEC__
+    ! Temporary storage for more efficient summation
+#ifdef DWD_REDUCTION_OPTIMIZATIONS
     real(jprb), dimension(nlev+1,3) :: sum_aux
 #else
-    real(jprb) :: sums_up, sums_dn, sums_dn_dir
+    real(jprb) :: sum_up, sum_dn_diff, sum_dn_dir
 #endif
 
     ! Number of g points
@@ -159,7 +157,7 @@ contains
         if (.not. config%do_sw_delta_scaling_with_gases) then
           ! Delta-Eddington scaling has already been performed to the
           ! aerosol part of od, ssa and g
-          call calc_reflectance_transmittance_sw(ng*nlev, &
+          call calc_ref_trans_sw(ng*nlev, &
                &  cos_sza, od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
                &  ref_clear, trans_clear, &
                &  ref_dir_clear, trans_dir_diff_clear, &
@@ -171,9 +169,9 @@ contains
             ssa_total = ssa(:,jlev,jcol)
             g_total   =   g(:,jlev,jcol)
             call delta_eddington(od_total, ssa_total, g_total)
-            call calc_reflectance_transmittance_sw(ng, &
+            call calc_ref_trans_sw(ng, &
                  &  cos_sza, od_total, ssa_total, g_total, &
-                 &  ref_clear(:,jlev),  trans_clear(:,jlev), &
+                 &  ref_clear(:,jlev), trans_clear(:,jlev), &
                  &  ref_dir_clear(:,jlev), trans_dir_diff_clear(:,jlev), &
                  &  trans_dir_dir_clear(:,jlev) )
           end do
@@ -185,12 +183,15 @@ contains
              &  ref_clear, trans_clear, ref_dir_clear, trans_dir_diff_clear, &
              &  trans_dir_dir_clear, flux_up, flux_dn_diffuse, flux_dn_direct)
         
-        ! Sum over g-points to compute and save clear-sky broadband fluxes
-#ifdef __NEC__
-        ! Vectorize over levels when doing the broadband sum (8x faster on NEC)
-        sum_aux(:,:) = 0._jprb
-        do jg = 1, ng
-          do jlev = 1, nlev+1
+        ! Sum over g-points to compute and save clear-sky broadband
+        ! fluxes. Note that the built-in "sum" function is very slow,
+        ! and before being replaced by the alternatives below
+        ! accounted for around 40% of the total cost of this routine.
+#ifdef DWD_REDUCTION_OPTIMIZATIONS
+        ! Optimized summation for the NEC architecture
+        sum_aux(:,:) = 0.0_jprb
+        do jg = 1,ng
+          do jlev = 1,nlev+1
             sum_aux(jlev,1) = sum_aux(jlev,1) + flux_up(jg,jlev)
             sum_aux(jlev,2) = sum_aux(jlev,2) + flux_dn_direct(jg,jlev)
             sum_aux(jlev,3) = sum_aux(jlev,3) + flux_dn_diffuse(jg,jlev)
@@ -198,24 +199,34 @@ contains
         end do
         flux%sw_up_clear(jcol,:) = sum_aux(:,1)
         flux%sw_dn_clear(jcol,:) = sum_aux(:,2) + sum_aux(:,3)
-        if (allocated(flux%sw_dn_direct_clear)) flux%sw_dn_direct_clear(jcol,:) = sum_aux(:,2)
+        if (allocated(flux%sw_dn_direct_clear)) then
+          flux%sw_dn_direct_clear(jcol,:) = sum_aux(:,2)
+        end if
 #else
-        do jlev = 1, nlev+1
-          sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
-          !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
-          do jg = 1, ng
-            sums_up = sums_up + flux_up(jg,jlev)
-            sums_dn = sums_dn + flux_dn_diffuse(jg,jlev)
-            sums_dn_dir = sums_dn_dir + flux_dn_direct(jg,jlev)
+        ! Optimized summation for the x86-64 architecture
+        do jlev = 1,nlev+1
+          sum_up      = 0.0_jprb
+          sum_dn_diff = 0.0_jprb
+          sum_dn_dir  = 0.0_jprb
+          !$omp simd reduction(+:sum_up, sum_dn_diff, sum_dn_dir)
+          do jg = 1,ng
+            sum_up      = sum_up      + flux_up(jg,jlev)
+            sum_dn_diff = sum_dn_diff + flux_dn_diffuse(jg,jlev)
+            sum_dn_dir  = sum_dn_dir  + flux_dn_direct(jg,jlev)
           end do
-          flux%sw_up_clear(jcol,jlev) = sums_up 
-          flux%sw_dn_clear(jcol,jlev) = sums_dn + sums_dn_dir
-          if (allocated(flux%sw_dn_direct_clear)) flux%sw_dn_direct_clear(jcol,jlev) = sums_dn_dir
+          flux%sw_up_clear(jcol,jlev) = sum_up
+          flux%sw_dn_clear(jcol,jlev) = sum_dn_diff + sum_dn_dir
+          if (allocated(flux%sw_dn_direct_clear)) then
+            flux%sw_dn_direct_clear(jcol,jlev) = sum_dn_dir
+          end if
         end do
 #endif
+        
         ! Store spectral downwelling fluxes at surface
-        flux%sw_dn_diffuse_surf_clear_g(:,jcol) = flux_dn_diffuse(:,nlev+1)
-        flux%sw_dn_direct_surf_clear_g(:,jcol)  = flux_dn_direct(:,nlev+1)
+        do jg = 1,ng
+          flux%sw_dn_diffuse_surf_clear_g(jg,jcol) = flux_dn_diffuse(jg,nlev+1)
+          flux%sw_dn_direct_surf_clear_g(jg,jcol)  = flux_dn_direct(jg,nlev+1)
+        end do
 
         ! Do cloudy-sky calculation
         call cloud_generator(ng, nlev, config%i_overlap_scheme, &
@@ -268,18 +279,21 @@ contains
 
               ! Compute cloudy-sky reflectance, transmittance etc at
               ! each model level
-              call calc_reflectance_transmittance_sw(ng, &
+              call calc_ref_trans_sw(ng, &
                    &  cos_sza, od_total, ssa_total, g_total, &
                    &  reflectance(:,jlev), transmittance(:,jlev), &
                    &  ref_dir(:,jlev), trans_dir_diff(:,jlev), &
                    &  trans_dir_dir(:,jlev))
+              
             else
               ! Clear-sky layer: copy over clear-sky values
-              reflectance(:,jlev) = ref_clear(:,jlev)
-              transmittance(:,jlev) = trans_clear(:,jlev)
-              ref_dir(:,jlev) = ref_dir_clear(:,jlev)
-              trans_dir_diff(:,jlev) = trans_dir_diff_clear(:,jlev)
-              trans_dir_dir(:,jlev) = trans_dir_dir_clear(:,jlev)
+              do jg = 1,ng
+                reflectance(jg,jlev) = ref_clear(jg,jlev)
+                transmittance(jg,jlev) = trans_clear(jg,jlev)
+                ref_dir(jg,jlev) = ref_dir_clear(jg,jlev)
+                trans_dir_diff(jg,jlev) = trans_dir_diff_clear(jg,jlev)
+                trans_dir_dir(jg,jlev) = trans_dir_dir_clear(jg,jlev)
+              end do
             end if
           end do
             
@@ -290,11 +304,10 @@ contains
                &  trans_dir_dir, flux_up, flux_dn_diffuse, flux_dn_direct)
           
           ! Store overcast broadband fluxes
-#ifdef __NEC__
-          ! Vectorize over levels when doing the broadband sum (8x faster on NEC)
-          sum_aux(:,:) = 0._jprb
-          do jg = 1, ng
-            do jlev = 1, nlev+1
+#ifdef DWD_REDUCTION_OPTIMIZATIONS
+          sum_aux(:,:) = 0.0_jprb
+          do jg = 1,ng
+            do jlev = 1,nlev+1
               sum_aux(jlev,1) = sum_aux(jlev,1) + flux_up(jg,jlev)
               sum_aux(jlev,2) = sum_aux(jlev,2) + flux_dn_direct(jg,jlev)
               sum_aux(jlev,3) = sum_aux(jlev,3) + flux_dn_diffuse(jg,jlev)
@@ -302,68 +315,87 @@ contains
           end do
           flux%sw_up(jcol,:) = sum_aux(:,1)
           flux%sw_dn(jcol,:) = sum_aux(:,2) + sum_aux(:,3)
-          if (allocated(flux%sw_dn_direct)) flux%sw_dn_direct(jcol,:) = sum_aux(:,2)
+          if (allocated(flux%sw_dn_direct)) then
+            flux%sw_dn_direct(jcol,:) = sum_aux(:,2)
+          end if
 #else
-          do jlev = 1, nlev+1
-            sums_up = 0.0_jprb; sums_dn = 0.0_jprb; sums_dn_dir = 0.0_jprb
-            !$omp simd reduction(+:sums_up, sums_dn, sums_dn_dir)
-            do jg = 1, ng
-              sums_up = sums_up + flux_up(jg,jlev)
-              sums_dn = sums_dn + flux_dn_diffuse(jg,jlev)
-              sums_dn_dir = sums_dn_dir + flux_dn_direct(jg,jlev)
+          do jlev = 1,nlev+1
+            sum_up      = 0.0_jprb
+            sum_dn_diff = 0.0_jprb
+            sum_dn_dir  = 0.0_jprb
+            !$omp simd reduction(+:sum_up, sum_dn_diff, sum_dn_dir)
+            do jg = 1,ng
+              sum_up      = sum_up      + flux_up(jg,jlev)
+              sum_dn_diff = sum_dn_diff + flux_dn_diffuse(jg,jlev)
+              sum_dn_dir  = sum_dn_dir  + flux_dn_direct(jg,jlev)
             end do
-            flux%sw_up(jcol,jlev) = sums_up 
-            flux%sw_dn(jcol,jlev) = sums_dn + sums_dn_dir
-            if (allocated(flux%sw_dn_direct)) flux%sw_dn_direct(jcol,jlev) = sums_dn_dir
+            flux%sw_up(jcol,jlev) = sum_up
+            flux%sw_dn(jcol,jlev) = sum_dn_diff + sum_dn_dir
+            if (allocated(flux%sw_dn_direct)) then
+              flux%sw_dn_direct(jcol,jlev) = sum_dn_dir
+            end if
           end do
 #endif
+          
           ! Cloudy flux profiles currently assume completely overcast
           ! skies; perform weighted average with clear-sky profile
-          flux%sw_up(jcol,:) =  total_cloud_cover *flux%sw_up(jcol,:) &
-               &  + (1.0_jprb - total_cloud_cover)*flux%sw_up_clear(jcol,:)
-          flux%sw_dn(jcol,:) =  total_cloud_cover *flux%sw_dn(jcol,:) &
-               &  + (1.0_jprb - total_cloud_cover)*flux%sw_dn_clear(jcol,:)
-          if (allocated(flux%sw_dn_direct)) then
-            flux%sw_dn_direct(jcol,:) = total_cloud_cover *flux%sw_dn_direct(jcol,:) &
-                 &  + (1.0_jprb - total_cloud_cover)*flux%sw_dn_direct_clear(jcol,:)
-          end if
+          do jlev = 1, nlev+1
+            flux%sw_up(jcol,jlev) =  total_cloud_cover *flux%sw_up(jcol,jlev) &
+                 &     + (1.0_jprb - total_cloud_cover)*flux%sw_up_clear(jcol,jlev)
+            flux%sw_dn(jcol,jlev) =  total_cloud_cover *flux%sw_dn(jcol,jlev) &
+                 &     + (1.0_jprb - total_cloud_cover)*flux%sw_dn_clear(jcol,jlev)
+            if (allocated(flux%sw_dn_direct)) then
+              flux%sw_dn_direct(jcol,jlev) = total_cloud_cover *flux%sw_dn_direct(jcol,jlev) &
+                   &  + (1.0_jprb - total_cloud_cover)*flux%sw_dn_direct_clear(jcol,jlev)
+            end if
+          end do
           ! Likewise for surface spectral fluxes
-          flux%sw_dn_diffuse_surf_g(:,jcol) = flux_dn_diffuse(:,nlev+1)
-          flux%sw_dn_direct_surf_g(:,jcol)  = flux_dn_direct(:,nlev+1)
-          flux%sw_dn_diffuse_surf_g(:,jcol) = total_cloud_cover *flux%sw_dn_diffuse_surf_g(:,jcol) &
-               &     + (1.0_jprb - total_cloud_cover)*flux%sw_dn_diffuse_surf_clear_g(:,jcol)
-          flux%sw_dn_direct_surf_g(:,jcol) = total_cloud_cover *flux%sw_dn_direct_surf_g(:,jcol) &
-               &     + (1.0_jprb - total_cloud_cover)*flux%sw_dn_direct_surf_clear_g(:,jcol)
-          
+          do jg = 1,ng
+            flux%sw_dn_diffuse_surf_g(jg,jcol) = flux_dn_diffuse(jg,nlev+1)
+            flux%sw_dn_direct_surf_g(jg,jcol)  = flux_dn_direct(jg,nlev+1)
+            flux%sw_dn_diffuse_surf_g(jg,jcol) = total_cloud_cover *flux%sw_dn_diffuse_surf_g(jg,jcol) &
+                 &                 + (1.0_jprb - total_cloud_cover)*flux%sw_dn_diffuse_surf_clear_g(jg,jcol)
+            flux%sw_dn_direct_surf_g(jg,jcol)  = total_cloud_cover *flux%sw_dn_direct_surf_g(jg,jcol) &
+                 &                 + (1.0_jprb - total_cloud_cover)*flux%sw_dn_direct_surf_clear_g(jg,jcol)
+          end do
+
         else
           ! No cloud in profile and clear-sky fluxes already
           ! calculated: copy them over
-          flux%sw_up(jcol,:) = flux%sw_up_clear(jcol,:)
-          flux%sw_dn(jcol,:) = flux%sw_dn_clear(jcol,:)
-          if (allocated(flux%sw_dn_direct)) then
-            flux%sw_dn_direct(jcol,:) = flux%sw_dn_direct_clear(jcol,:)
-          end if
-          flux%sw_dn_diffuse_surf_g(:,jcol) = flux%sw_dn_diffuse_surf_clear_g(:,jcol)
-          flux%sw_dn_direct_surf_g(:,jcol)  = flux%sw_dn_direct_surf_clear_g(:,jcol)
+          do jlev = 1, nlev+1
+            flux%sw_up(jcol,jlev) = flux%sw_up_clear(jcol,jlev)
+            flux%sw_dn(jcol,jlev) = flux%sw_dn_clear(jcol,jlev)
+            if (allocated(flux%sw_dn_direct)) then
+              flux%sw_dn_direct(jcol,jlev) = flux%sw_dn_direct_clear(jcol,jlev)
+            end if
+          end do
+          do jg = 1,ng
+            flux%sw_dn_diffuse_surf_g(jg,jcol) = flux%sw_dn_diffuse_surf_clear_g(jg,jcol)
+            flux%sw_dn_direct_surf_g(jg,jcol)  = flux%sw_dn_direct_surf_clear_g(jg,jcol)
+          end do
 
         end if ! Cloud is present in profile
 
       else
         ! Set fluxes to zero if sun is below the horizon
-        flux%sw_up(jcol,:) = 0.0_jprb
-        flux%sw_dn(jcol,:) = 0.0_jprb
-        if (allocated(flux%sw_dn_direct)) then
-          flux%sw_dn_direct(jcol,:) = 0.0_jprb
-        end if
-        flux%sw_up_clear(jcol,:) = 0.0_jprb
-        flux%sw_dn_clear(jcol,:) = 0.0_jprb
-        if (allocated(flux%sw_dn_direct_clear)) then
-          flux%sw_dn_direct_clear(jcol,:) = 0.0_jprb
-        end if
-        flux%sw_dn_diffuse_surf_g(:,jcol) = 0.0_jprb
-        flux%sw_dn_direct_surf_g(:,jcol)  = 0.0_jprb
-        flux%sw_dn_diffuse_surf_clear_g(:,jcol) = 0.0_jprb
-        flux%sw_dn_direct_surf_clear_g(:,jcol)  = 0.0_jprb
+        do jlev = 1, nlev+1
+          flux%sw_up(jcol,jlev) = 0.0_jprb
+          flux%sw_dn(jcol,jlev) = 0.0_jprb
+          if (allocated(flux%sw_dn_direct)) then
+            flux%sw_dn_direct(jcol,jlev) = 0.0_jprb
+          end if
+          flux%sw_up_clear(jcol,jlev) = 0.0_jprb
+          flux%sw_dn_clear(jcol,jlev) = 0.0_jprb
+          if (allocated(flux%sw_dn_direct_clear)) then
+            flux%sw_dn_direct_clear(jcol,jlev) = 0.0_jprb
+          end if
+        end do
+        do jg = 1,ng
+          flux%sw_dn_diffuse_surf_g(jg,jcol) = 0.0_jprb
+          flux%sw_dn_direct_surf_g(jg,jcol)  = 0.0_jprb
+          flux%sw_dn_diffuse_surf_clear_g(jg,jcol) = 0.0_jprb
+          flux%sw_dn_direct_surf_clear_g(jg,jcol)  = 0.0_jprb
+        end do
       end if ! Sun above horizon
 
     end do ! Loop over columns
