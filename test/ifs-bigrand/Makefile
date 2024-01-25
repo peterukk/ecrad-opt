@@ -5,11 +5,11 @@
 # and provide the location below
 # Then just run the test e.g.: OMP_NUM_THREADS=64 make test_big_ecckd_tc
 
+INPUT_BIG = ecrad_highres_40k.nc
 # INPUT_BIG = /perm/papu/ecrad_inputs/ecrad_highres_40k.nc
-# NREPEAT_TIMING = 10
-
-INPUT_BIG = /perm/papu/ecrad_inputs/ecrad_highres_10k.nc
+# INPUT_BIG = /perm/papu/ecrad_inputs/ecrad_highres_10k.nc
 NREPEAT_TIMING = 1
+# NREPEAT_TIMING = 10
 
 DRIVER = ../../bin/ecrad
 CHANGENAM = ../common/change_namelist.sh
