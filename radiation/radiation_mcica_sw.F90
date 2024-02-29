@@ -157,7 +157,7 @@ contains
         if (.not. config%do_sw_delta_scaling_with_gases) then
           ! Delta-Eddington scaling has already been performed to the
           ! aerosol part of od, ssa and g
-          call calc_ref_trans_sw(ng*nlev, &
+          call calc_ref_trans_sw(ng,nlev, &
                &  cos_sza, od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
                &  ref_clear, trans_clear, &
                &  ref_dir_clear, trans_dir_diff_clear, &
@@ -169,7 +169,7 @@ contains
             ssa_total = ssa(:,jlev,jcol)
             g_total   =   g(:,jlev,jcol)
             call delta_eddington(od_total, ssa_total, g_total)
-            call calc_ref_trans_sw(ng, &
+            call calc_ref_trans_sw(ng,1,&
                  &  cos_sza, od_total, ssa_total, g_total, &
                  &  ref_clear(:,jlev), trans_clear(:,jlev), &
                  &  ref_dir_clear(:,jlev), trans_dir_diff_clear(:,jlev), &
@@ -279,7 +279,7 @@ contains
 
               ! Compute cloudy-sky reflectance, transmittance etc at
               ! each model level
-              call calc_ref_trans_sw(ng, &
+              call calc_ref_trans_sw(ng, 1, &
                    &  cos_sza, od_total, ssa_total, g_total, &
                    &  reflectance(:,jlev), transmittance(:,jlev), &
                    &  ref_dir(:,jlev), trans_dir_diff(:,jlev), &

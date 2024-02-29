@@ -92,8 +92,7 @@ contains
          &                               indexed_sum, add_indexed_sum
     use radiation_matrix
     use radiation_two_stream, only     : calc_two_stream_gammas_sw, &
-         & calc_ref_trans_sw, &
-         &  calc_ref_trans_sw, calc_frac_scattered_diffuse_sw, &
+         & calc_ref_trans_sw, calc_frac_scattered_diffuse_sw, &
          &  SwDiffusivity
     use radiation_constants, only      : Pi, GasConstantDryAir, AccelDueToGravity
 
@@ -554,7 +553,7 @@ contains
       ! 1. Reftrans computations for clear-sky-region : these are done for all layers, also for cloudy layers
       od_region_clear = od(:,:,jcol)
 
-      call calc_ref_trans_sw(ng*nlev, &
+      call calc_ref_trans_sw(ng,nlev, &
           &  mu0, od_region_clear, ssa(:,:,jcol), g(:,:,jcol), &
           &  ref_clear, trans_clear, ref_dir_clear, trans_dir_diff_clear, trans_dir_dir_clear, &
           &  gamma1_clear, gamma2_clear, gamma3_clear)
@@ -742,12 +741,12 @@ contains
         ! Write diagonal elements of Gamma_z1
         ! Clear-sky region
         jreg = 1
-        call write_gamma_diag(ng*nlev_cld, nreg, jreg, od_region_clear(:,jtop:jbot), &
+        call write_gamma_diag(ng,nlev_cld, nreg, jreg, od_region_clear(:,jtop:jbot), &
         &   gamma1_clear(:,jtop:jbot), gamma2_clear(:,jtop:jbot), gamma3_clear(:,jtop:jbot), &
         &   ssa(:,jtop:jbot,jcol), one_over_mu0, Gamma_z1)
         ! Cloudy regions
         do jreg = 2, nreg
-          call write_gamma_diag(ng*nlev_cld, nreg, jreg, od_region_cld(:,:,jreg), &
+          call write_gamma_diag(ng,nlev_cld, nreg, jreg, od_region_cld(:,:,jreg), &
           &   gamma1_cld(:,:,jreg), gamma2_cld(:,:,jreg), gamma3_cld(:,:,jreg), &
           &   ssa_region_cld(:,:,jreg), one_over_mu0, Gamma_z1)
         end do
@@ -1788,21 +1787,21 @@ end if
 
 end subroutine step_migrations
 
-pure subroutine write_gamma_diag(n, nreg, jreg, od_region, &
+pure subroutine write_gamma_diag(ng_sw_in, nlev, nreg, jreg, od_region, &
   &   gamma1, gamma2, gamma3, ssa, one_over_mu0, Gamma_z1)
 
   use parkind1, only : jprb
 
   ! Inputs
   ! Number of g points times levels to process (collapsed dimension)
-  integer, intent(in) :: n
+  integer, intent(in) :: ng_sw_in, nlev
   ! Number of regions and region index 
   integer, intent(in) :: nreg, jreg
 
-  real(jprb), intent(in), dimension(n) :: od_region, gamma1, gamma2, gamma3, ssa
+  real(jprb), intent(in), dimension(ng*nlev) :: od_region, gamma1, gamma2, gamma3, ssa
   real(jprb), intent(in) :: one_over_mu0
 
-  real(jprb), intent(inout), dimension(n, 3*nreg, 3*nreg) :: Gamma_z1
+  real(jprb), intent(inout), dimension(ng*nlev, 3*nreg, 3*nreg) :: Gamma_z1
 
   integer :: jg
 

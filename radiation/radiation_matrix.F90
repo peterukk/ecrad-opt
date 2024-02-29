@@ -27,7 +27,10 @@
 module radiation_matrix
 
   use parkind1, only : jprb, jprd
-
+#ifdef USE_TIMING
+    ! Timing library
+    use gptl,                  only: gptlstart, gptlstop
+#endif
 
   implicit none
   public
@@ -330,7 +333,10 @@ contains
 
     integer,    intent(in)                          :: ng
     real(jprb), intent(in),     dimension(ng,3,3)  :: A, B
+    !dir$ assume_aligned A:64, B:64
     real(jprb), intent(inout),  dimension(ng,3,3)  :: C
+    !dir$ assume_aligned C:64
+
     integer    :: j1, j2
 
     do j2 = 1,3
@@ -345,7 +351,9 @@ contains
 
     integer,    intent(in)                            :: ng_sw_in
     real(jprb), intent(in),     dimension(ng_sw,3,3)  :: A, B
+    !dir$ assume_aligned A:64, B:64
     real(jprb), intent(inout),  dimension(ng_sw,3,3)  :: C
+    !dir$ assume_aligned C:64
     integer    :: j1, j2!, i,j,k
 
     do j2 = 1,3
@@ -2036,6 +2044,9 @@ contains
     integer    :: j1, j2, j3, jg, minexpo, nrepeat, jS, jE
     integer    :: expo(ng_sw*nlev_b)
     real(jphook) :: hook_handle
+#ifdef USE_TIMING
+    integer :: ret
+#endif
 
     if (lhook) call dr_hook('radiation_matrix:expm_sw',0,hook_handle)
 
@@ -2077,10 +2088,15 @@ contains
       ! call mat_square_sw_repeats(N,A,A2) 
       ! call mat_square_sw_repeats(N,A2,A4)
       ! call mat_x_mat_sw_repeats(N,A2,A4,A6) 
+#ifdef USE_TIMING
+    ret =  gptlstart('matrep')
+#endif
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A,A,A2)
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A2,A2,A4)
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A2,A4,A6) 
-
+#ifdef USE_TIMING
+    ret =  gptlstop('matrep')
+#endif
       do j3 = 1,9
         do j2 = 1,9
           if (.not.((j2>6) .and. (j3<7))) then

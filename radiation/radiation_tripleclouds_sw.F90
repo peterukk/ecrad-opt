@@ -59,7 +59,10 @@ contains
          &                               indexed_sum, add_indexed_sum
     use radiation_matrix, only         : singlemat_x_vec, singlemat_x_vec_sw
     use radiation_two_stream, only     : calc_ref_trans_sw
-
+#ifdef USE_TIMING
+    ! Timing library
+    use gptl,                  only: gptlstart, gptlstop
+#endif
     implicit none
 
 ! Allow size of inner dimension (number of g-points) to be known at compile time if NG_SW is defined
@@ -279,7 +282,7 @@ integer, parameter :: ng = NG_SW
       ! are computed for each layer
 
       ! ...clear-sky equivalents
-      call calc_ref_trans_sw(ng*nlev, &
+      call calc_ref_trans_sw(ng,nlev, &
           &  mu0, od(:,:,jcol), ssa(:,:,jcol), g(:,:,jcol), &
           &  reflectance_clear, transmittance_clear, &
           &  ref_dir_clear, trans_dir_diff_clear, &
@@ -367,7 +370,7 @@ integer, parameter :: ng = NG_SW
           end do
         end do
 
-        call calc_ref_trans_sw(ng*2*nlev_cloud, &
+        call calc_ref_trans_sw(ng,2*nlev_cloud, &
            &  mu0, od_tot_batch, ssa_tot_batch, g_tot_batch, &
            &  reflectance(:,:,jtop:jbot), transmittance(:,:,jtop:jbot), &
            &  ref_dir(:,:,jtop:jbot), trans_dir_diff(:,:,jtop:jbot), trans_dir_dir(:,:,jtop:jbot))

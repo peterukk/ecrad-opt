@@ -151,7 +151,7 @@ contains
               call calc_two_stream_gammas_sw(ng, cos_sza, &
                    &  ssa(:,jlev,jcol), g(:,jlev,jcol), &
                    &  gamma1, gamma2, gamma3)
-              call calc_ref_trans_sw(ng, &
+              call calc_ref_trans_sw(ng, 1,&
                    &  cos_sza, &
                    &  od(:,jlev,jcol), ssa(:,jlev,jcol), &
                    &  gamma1, gamma2, gamma3, &
@@ -173,7 +173,7 @@ contains
               call calc_two_stream_gammas_sw(ng, &
                    &  cos_sza, ssa_total, g_total, &
                    &  gamma1, gamma2, gamma3)
-              call calc_ref_trans_sw(ng, &
+              call calc_ref_trans_sw(ng, 1,&
                    &  cos_sza, od_total, ssa_total, &
                    &  gamma1, gamma2, gamma3, &
                    &  reflectance(:,jlev), transmittance(:,jlev), &
@@ -262,7 +262,7 @@ contains
               call calc_two_stream_gammas_sw(ng, &
                    &  cos_sza, ssa_total, g_total, &
                    &  gamma1, gamma2, gamma3)
-              call calc_ref_trans_sw(ng, &
+              call calc_ref_trans_sw(ng, 1,&
                    &  cos_sza, od_total, ssa_total, &
                    &  gamma1, gamma2, gamma3, &
                    &  reflectance(:,jlev), transmittance(:,jlev), &

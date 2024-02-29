@@ -67,6 +67,13 @@ module radiation_two_stream
 
   private :: OdThresholdLw, Half, One, Two, KMinSw, KMinLw
 
+! Allow size of inner dimension (number of g-points) to be known at compile time if NG_SW is defined
+#ifdef NG_SW
+  integer, parameter, private :: ng_sw = NG_SW
+#else
+#define ng_sw ng_sw_in
+#endif
+
 contains
 
   !---------------------------------------------------------------------
@@ -442,7 +449,7 @@ contains
   ! computations of gamma, and exponentials kept out of loops to facilitate vectorization
   ! Adapted from RTE (Radiative Transfer for Energetics) code (Robert Pincus)
   ! Optimizations by PU and RH
-  subroutine calc_ref_trans_sw(ng, mu0, od, ssa, &
+  subroutine calc_ref_trans_sw(ng_sw_in, nlev, mu0, od, ssa, &
        &      asymmetry, ref_diff, trans_diff, &
        &      ref_dir, trans_dir_diff, trans_dir_dir, &
        &      gamma1_out, gamma2_out, gamma3_out)
@@ -450,37 +457,37 @@ contains
 #ifdef DO_DR_HOOK_TWO_STREAM
     use yomhook, only : lhook, dr_hook, jphook
 #endif
-    integer, intent(in) :: ng
+    integer, intent(in) :: ng_sw_in, nlev
 
     ! Cosine of solar zenith angle
     real(jprb), intent(in) :: mu0
 
     ! Optical depth, single scattering albedo and asymmetry factor
-    real(jprb), intent(in), dimension(ng) :: od, ssa, asymmetry
+    real(jprb), intent(in), dimension(ng_sw*nlev) :: od, ssa, asymmetry
 
     ! The direct reflectance and transmittance, i.e. the fraction of
     ! incoming direct solar radiation incident at the top of a layer
     ! that is either reflected back (ref_dir) or scattered but
     ! transmitted through the layer to the base (trans_dir_diff)
-    real(jprb), intent(out), dimension(ng) :: ref_dir, trans_dir_diff
+    real(jprb), intent(out), dimension(ng_sw*nlev) :: ref_dir, trans_dir_diff
 
     ! The diffuse reflectance and transmittance, i.e. the fraction of
     ! diffuse radiation incident on a layer from either top or bottom
     ! that is reflected back or transmitted through
-    real(jprb), intent(out), dimension(ng) :: ref_diff, trans_diff
+    real(jprb), intent(out), dimension(ng_sw*nlev) :: ref_diff, trans_diff
 
     ! Transmittance of the direct been with no scattering
-    real(jprb), intent(out), dimension(ng) :: trans_dir_dir
+    real(jprb), intent(out), dimension(ng_sw*nlev) :: trans_dir_dir
 
     ! The transfer coefficients from the two-stream differential
     ! equations
 #ifndef DWD_TWO_STREAM_OPTIMIZATIONS
-    real(jprb), intent(out), optional, target, dimension(ng) :: gamma1_out, gamma2_out, gamma3_out
-    real(jprb), dimension(ng), target :: gamma1_loc, gamma2_loc, gamma3_loc
+    real(jprb), intent(out), optional, target, dimension(ng_sw*nlev) :: gamma1_out, gamma2_out, gamma3_out
+    real(jprb), dimension(ng_sw*nlev), target :: gamma1_loc, gamma2_loc, gamma3_loc
     real(jprb), dimension(:), contiguous, pointer :: gamma1, gamma2, gamma3
-    real(jprb), dimension(ng) :: gamma4
-    real(jprb), dimension(ng) :: k_exponent !alpha1, alpha2, k_exponent
-    real(jprb), dimension(ng) :: exponential  ! = exp(-k_exponent*od)
+    real(jprb), dimension(ng_sw*nlev) :: gamma4
+    real(jprb), dimension(ng_sw*nlev) :: k_exponent !alpha1, alpha2, k_exponent
+    real(jprb), dimension(ng_sw*nlev) :: exponential  ! = exp(-k_exponent*od)
 #else
     real(jprb) :: gamma1, gamma2, gamma3, gamma4 
     real(jprb) :: alpha1, alpha2, k_exponent
@@ -524,7 +531,7 @@ contains
 
     associate(alpha1=>trans_dir_diff, alpha2=>ref_dir)
 
-    do jg = 1, ng
+    do jg = 1, ng_sw*nlev
 
       factor = 0.75_jprb*asymmetry(jg)
 
@@ -548,7 +555,7 @@ contains
 
     exponential(:) = exp(-k_exponent(:)*od(:))
 
-    do jg = 1, ng
+    do jg = 1, ng_sw*nlev
       k_mu0 = k_exponent(jg)*mu0
       one_minus_kmu0_sqr = 1.0_jprb - k_mu0*k_mu0
       k_gamma3 = k_exponent(jg)*gamma3(jg)
@@ -598,7 +605,7 @@ contains
 
 #else
     ! GPU-capable and vector-optimized version for ICON
-    do jg = 1, ng
+    do jg = 1, ng_sw*nlev
 
       trans_dir_dir(jg) = max(-max(od(jg) * (1.0_jprb/mu0),0.0_jprb),-1000.0_jprb)
       trans_dir_dir(jg) = exp(trans_dir_dir(jg))
