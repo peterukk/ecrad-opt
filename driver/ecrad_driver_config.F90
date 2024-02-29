@@ -51,6 +51,7 @@ module ecrad_driver_config
      real(jprb) :: solar_irradiance_override ! W m-2
      real(jprb) :: solar_cycle_multiplier_override
      real(jprb) :: cos_sza_override
+     real(jprb) :: cos_sensor_zenith_angle_override
      real(jprb) :: cloud_inhom_separation_factor  = 1.0_jprb
      real(jprb) :: cloud_separation_scale_surface = -1.0_jprb
      real(jprb) :: cloud_separation_scale_toa     = -1.0_jprb
@@ -168,6 +169,7 @@ contains
     real(jprb) :: overlap_decorr_length_scaling
     real(jprb) :: skin_temperature
     real(jprb) :: cos_solar_zenith_angle
+    real(jprb) :: cos_sensor_zenith_angle
     real(jprb) :: solar_irradiance_override
     real(jprb) :: solar_cycle_multiplier_override
     real(jprb) :: cloud_inhom_separation_factor
@@ -220,6 +222,7 @@ contains
          &  high_inv_effective_size, middle_inv_effective_size, &
          &  low_inv_effective_size, cloud_inhom_separation_factor, &
          &  effective_size_scaling, cos_solar_zenith_angle, &
+         &  cos_sensor_zenith_angle, &
          &  lw_emissivity, q_liquid_scaling, q_ice_scaling, &
          &  istartcol, iendcol, solar_irradiance_override, &
          &  solar_cycle_multiplier_override, &
@@ -261,6 +264,7 @@ contains
     overlap_decorr_length_scaling = -1.0_jprb
     skin_temperature = -1.0_jprb
     cos_solar_zenith_angle = -1.0_jprb
+    cos_sensor_zenith_angle = -2.0_jprb
     solar_irradiance_override = -1.0_jprb
     solar_cycle_multiplier_override = -2.0e6_jprb
     cloud_inhom_separation_factor = 1.0_jprb
@@ -374,6 +378,7 @@ contains
     this%overlap_decorr_length_scaling = overlap_decorr_length_scaling
     this%skin_temperature_override = skin_temperature
     this%cos_sza_override = cos_solar_zenith_angle
+    this%cos_sensor_zenith_angle_override = cos_sensor_zenith_angle
     this%solar_irradiance_override = solar_irradiance_override
     this%solar_cycle_multiplier_override = solar_cycle_multiplier_override
     this%cloud_inhom_separation_factor = cloud_inhom_separation_factor

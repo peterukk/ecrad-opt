@@ -214,7 +214,7 @@ contains
     use radiation_config,         only : config_type, &
          &   IGasModelMonochromatic, IGasModelIFSRRTMG, IGasModelRRTMGP, &
          &   IGasModelRRTMGP_NN, IGasModelECCKD, ISolverMcICA, &
-         &   ISolverSpartacus, ISolverHomogeneous, ISolverTripleclouds
+         &   ISolverSpartacus, ISolverHomogeneous, ISolverTripleclouds, ISolverTcrad
     use radiation_single_level,   only : single_level_type
     use radiation_thermodynamics, only : thermodynamics_type
     use radiation_gas,            only : gas_type
@@ -231,6 +231,7 @@ contains
     use radiation_cloudless_lw,   only : solver_cloudless_lw
     use radiation_homogeneous_sw, only : solver_homogeneous_sw
     use radiation_homogeneous_lw, only : solver_homogeneous_lw
+    use radiation_tcrad_lw,       only : solver_tcrad_lw, radiance_solver_tcrad_lw
     use radiation_save,           only : save_radiative_properties
 #ifdef USE_TIMING
     ! Timing library
@@ -472,7 +473,22 @@ contains
           write(nulout,'(a)') 'Computing longwave fluxes'
         end if
 
-        if (config%i_solver_lw == ISolverMcICA) then
+        if (config%do_radiances) then
+          if (config%i_solver_lw == ISolverTcrad) then
+#ifdef USE_TIMING
+    ret =  gptlstart('tcrad_lw')
+#endif  
+            ! Compute radiances using the TCRAD longwave solver
+            call radiance_solver_tcrad_lw(nlev,istartcol,iendcol, &
+                 &  config, thermodynamics, &
+                 &  cloud, single_level%cos_sensor_zenith_angle, & 
+                 &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
+                 &  planck_hl, lw_emission, lw_albedo, flux)
+#ifdef USE_TIMING
+    ret =  gptlstop('tcrad_lw')
+#endif       
+          end if
+        else if (config%i_solver_lw == ISolverMcICA) then
 #ifdef USE_TIMING
     ret =  gptlstart('mcica_lw')
 #endif  
@@ -514,6 +530,12 @@ contains
                &  config, cloud, & 
                &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, &
                &  g_lw_cloud, planck_hl, lw_emission, lw_albedo, flux)
+        elseif (config%i_solver_lw == ISolverTcrad) then
+          ! Compute fluxes using the TCRAD longwave solver
+          call solver_tcrad_lw(nlev,istartcol,iendcol, &
+               &  config, thermodynamics, cloud, & 
+               &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
+               &  planck_hl, lw_emission, lw_albedo, flux)
         else
           ! Compute fluxes using the cloudless solver
           call solver_cloudless_lw(nlev,istartcol,iendcol, &

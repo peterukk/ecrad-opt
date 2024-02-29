@@ -28,7 +28,8 @@ contains
 
     use parkind1,                 only : jprb, jpim
     use radiation_io,             only : nulout
-    use radiation_config,         only : config_type, ISolverSPARTACUS, IGasModelRRTMGP, IGasModelRRTMGP_NN
+    use radiation_config,         only : config_type, ISolverSPARTACUS, ISolverTCRAD, &
+        &   IGasModelRRTMGP, IGasModelRRTMGP_NN
     use ecrad_driver_config,      only : driver_config_type
     use radiation_single_level,   only : single_level_type
     use radiation_thermodynamics, only : thermodynamics_type
@@ -387,9 +388,10 @@ contains
       ! --------------------------------------------------------
       ! Read cloud properties needed by SPARTACUS
       ! --------------------------------------------------------
-
       if (config%i_solver_sw == ISolverSPARTACUS &
-           &  .or.   config%i_solver_lw == ISolverSPARTACUS) then
+           &  .or.   config%i_solver_lw == ISolverSPARTACUS &
+           &  .or. (config%i_solver_lw == ISolverTCRAD &
+           &        .and. config%do_3d_effects)) then
 
         ! 3D radiative effects are governed by the length of cloud
         ! edge per area of gridbox, which is characterized by the
@@ -456,6 +458,22 @@ contains
                 &  driver_config%cloud_separation_scale_power, &
                 &  driver_config%cloud_inhom_separation_factor)
           end do
+          
+        else if (file%exists('inv_cloud_effective_size_up_lw') &
+             &  .and. file%exists('inv_cloud_effective_size_dn_lw')) then
+          ! (3a) NetCDF file contains cloud effective size
+          ! In TCRAD we have the possibility of separate upward and
+          ! downward effective sizes
+
+          call file%get('inv_cloud_effective_size_up_lw', prop_2d, do_transp = .false.)
+          call file%get('inv_cloud_effective_size_dn_lw', prop_2d_2, do_transp = .false.)
+
+          do b = 1, nblocks
+            cloud(b)%inv_cloud_effective_size_up_lw = transpose(prop_2d(:,istartcols(b):iendcols(b)))
+            cloud(b)%inv_cloud_effective_size_dn_lw = transpose(prop_2d_2(:,istartcols(b):iendcols(b)))
+          end do
+          deallocate(prop_2d, prop_2d_2)
+
         else if (file%exists('inv_cloud_effective_size')) then
           ! (3) NetCDF file contains cloud effective size
 

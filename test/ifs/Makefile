@@ -25,7 +25,7 @@ test: test_orig test_ecckd
 # Tests of CY47R1 configuration with RRTMG gas optics model and
 # various solvers
 test_orig: test_default test_noaer test_expexp test_vec test_tripleclouds test_spartacus \
-	test_spartacus_maxentr
+	test_spartacus_maxentr test_tcrad
 
 # Tests of ecCKD gas optics model and various solvers
 test_ecckd: test_ecckd_mcica test_ecckd_tc test_ecckd_tc_noaer test_ecckd_spartacus
@@ -87,6 +87,20 @@ test_spartacus_maxentr:
 		sw_entrapment_name='"Maximum"' \
 		do_sw_delta_scaling_with_gases="false"
 	$(DRIVER) config_spartacus_maxentr.nam $(INPUT).nc $(INPUT)_spartacus_maxentr_out.nc
+
+# Tripleclouds solver with exponential-random overlap 
+test_tcrad:
+	$(CHANGENAM) $(CONFIG) config_tcrad.nam \
+		sw_solver_name='"Tripleclouds"' lw_solver_name='"TCRAD"' \
+		overlap_scheme_name='"Exp-Ran"'
+	$(DRIVER) config_tcrad.nam $(INPUT).nc $(INPUT)_tcrad_out.nc
+
+test_tcrad_3D:
+	$(CHANGENAM) $(CONFIG) config_tcrad_3D.nam \
+		sw_solver_name='"Tripleclouds"' lw_solver_name='"TCRAD"' \
+		do_3d_effects="true" \
+		overlap_scheme_name='"Exp-Ran"'
+	$(DRIVER) config_tcrad_3D.nam $(INPUT).nc $(INPUT)_tcrad_out.nc
 
 # "Cloudless" solver
 test_cloudless:

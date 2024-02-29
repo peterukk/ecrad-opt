@@ -61,13 +61,14 @@ module radiation_config
   ! for both
   enum, bind(c) 
      enumerator ISolverCloudless, ISolverHomogeneous, ISolverMcICA, &
-          &     ISolverSpartacus, ISolverTripleclouds 
+          &     ISolverSpartacus, ISolverTripleclouds, ISolverTcrad
   end enum
-  character(len=*), parameter :: SolverName(0:4) = (/ 'Cloudless   ', &
+  character(len=*), parameter :: SolverName(0:5) = (/ 'Cloudless   ', &
        &                                              'Homogeneous ', &
        &                                              'McICA       ', &
        &                                              'SPARTACUS   ', &
-       &                                              'Tripleclouds' /)
+       &                                              'Tripleclouds', &
+       &                                              'TCRAD       ' /)
 
   ! SPARTACUS shortwave solver can treat the reflection of radiation
   ! back up into different regions in various ways
@@ -347,6 +348,11 @@ module radiation_config
 
     ! Do we include 3D effects?
     logical :: do_3d_effects = .true.
+
+    ! Do we compute radiances for simulating satellite or surface
+    ! radiometer observations, instead of fluxes?  Only available in
+    ! the longwave.
+    logical :: do_radiances = .false.
     
     character(len=511) :: cloud_type_name(NMaxCloudTypes) = ["","","","","","","","","","","",""]
 ! &
@@ -383,6 +389,22 @@ module radiation_config
     ! Do we account for the effective emissivity of the side of
     ! clouds?
     logical :: do_lw_side_emissivity = .true.
+
+    ! Number of angles per hemisphere in longwave TCRAD solver, where
+    ! 0 means classic Tripleclouds method, while N runs the TCRAD
+    ! Tripleclouds solver then performs N radiances calculations per
+    ! hemisphere using the Tripleclouds solution to provide the
+    ! scattering source function. N=2 is the method of Fu et
+    ! al. (1997).
+    integer :: n_angles_per_hemisphere_lw = 2
+
+    ! Do we use the Eddington scheme for TCRAD radiances?  Otherwise
+    ! use the 2-stream scheme with the Elsasser factor (consistent
+    ! with ecRad's other longwave treatment)
+    logical :: use_tcrad_eddington = .false.
+    
+    ! Treat surface as specular reflector?  Only in microwave
+    logical :: do_specular_surface = .false.
 
     ! The 3D transfer rate "X" is such that if transport out of a
     ! region was the only process occurring then by the base of a
@@ -716,8 +738,10 @@ contains
     ! To be read from the radiation_config namelist 
     logical :: do_sw, do_lw, do_clear, do_sw_direct
     logical :: do_3d_effects, use_expm_everywhere, use_aerosols
+    logical :: do_lw_side_emissivity, do_radiances
+    integer :: n_angles_per_hemisphere_lw
+    logical :: do_specular_surface, use_tcrad_eddington
     logical :: use_general_cloud_optics, use_general_aerosol_optics
-    logical :: do_lw_side_emissivity
     logical :: do_3d_lw_multilayer_effects, do_fu_lw_ice_optics_bug
     logical :: do_lw_aerosol_scattering, do_lw_cloud_scattering
     logical :: do_save_radiative_properties, do_save_spectral_flux
@@ -765,7 +789,8 @@ contains
     integer :: iunit ! Unit number of namelist file
 
     namelist /radiation/ do_sw, do_lw, do_sw_direct, &
-         &  do_3d_effects, do_lw_side_emissivity, do_clear, &
+         &  do_3d_effects, do_lw_side_emissivity, do_clear, do_radiances, &
+         &  n_angles_per_hemisphere_lw, do_specular_surface, use_tcrad_eddington, &
          &  do_save_radiative_properties, sw_entrapment_name, sw_encroachment_name, &
          &  do_3d_lw_multilayer_effects, do_fu_lw_ice_optics_bug, &
          &  do_save_spectral_flux, do_save_gpoint_flux, &
@@ -809,8 +834,12 @@ contains
     do_lw = this%do_lw
     do_sw_direct = this%do_sw_direct
     do_3d_effects = this%do_3d_effects
+    do_radiances = this%do_radiances
     do_3d_lw_multilayer_effects = this%do_3d_lw_multilayer_effects
     do_lw_side_emissivity = this%do_lw_side_emissivity
+    n_angles_per_hemisphere_lw = this%n_angles_per_hemisphere_lw
+    use_tcrad_eddington = this%use_tcrad_eddington
+    do_specular_surface = this%do_specular_surface
     do_clear = this%do_clear
     do_lw_aerosol_scattering = this%do_lw_aerosol_scattering
     do_lw_cloud_scattering = this%do_lw_cloud_scattering
@@ -973,8 +1002,12 @@ contains
     this%do_clear = do_clear
     this%do_sw_direct = do_sw_direct
     this%do_3d_effects = do_3d_effects
+    this%do_radiances = do_radiances
     this%do_3d_lw_multilayer_effects = do_3d_lw_multilayer_effects
     this%do_lw_side_emissivity = do_lw_side_emissivity
+    this%n_angles_per_hemisphere_lw = n_angles_per_hemisphere_lw
+    this%use_tcrad_eddington = use_tcrad_eddington
+    this%do_specular_surface = do_specular_surface
     this%use_expm_everywhere = use_expm_everywhere
     this%use_aerosols = use_aerosols
     this%do_lw_cloud_scattering = do_lw_cloud_scattering
@@ -1181,7 +1214,9 @@ contains
     use parkind1,     only : jprd
     use yomhook,      only : lhook, dr_hook, jphook
     use radiation_io, only : nulout, nulerr, radiation_abort
-
+    use tcrad_layer_solutions, only : set_two_stream_scheme, &
+         &                            ITwoStreamEddington, ITwoStreamElsasser
+    
     class(config_type), intent(inout)         :: this
 
     real(jphook) :: hook_handle
@@ -1208,9 +1243,10 @@ contains
     if ((       this%i_solver_sw == ISolverSPARTACUS &
          & .or. this%i_solver_lw == ISolverSPARTACUS &
          & .or. this%i_solver_sw == ISolverTripleclouds &
-         & .or. this%i_solver_lw == ISolverTripleclouds) &
+         & .or. this%i_solver_lw == ISolverTripleclouds &
+         & .or. this%i_solver_lw == ISolverTCRAD) &
          & .and. this%i_overlap_scheme /= IOverlapExponentialRandom) then
-      write(nulerr,'(a)') '*** Error: SPARTACUS/Tripleclouds solvers can only do Exponential-Random overlap'
+      write(nulerr,'(a)') '*** Error: SPARTACUS/Tripleclouds/TCRAD solvers can only do Exponential-Random overlap'
       call radiation_abort('Radiation configuration error')
     end if
 
@@ -1463,6 +1499,14 @@ contains
       this%is_homogeneous = .true.
     end if
 
+    if (this%i_solver_lw == ISolverTCRAD) then
+      if (this%use_tcrad_eddington) then
+        call set_two_stream_scheme(ITwoStreamEddington)
+      else
+        call set_two_stream_scheme(ITwoStreamElsasser)
+      end if
+    end if
+    
     this%is_consolidated = .true.
 
     if (lhook) call dr_hook('radiation_config:consolidate',1,hook_handle)
@@ -1550,6 +1594,8 @@ contains
         call print_logical('  General aerosol optics', &
              &             'use_general_aerosol_optics', this%use_general_aerosol_optics)
       end if
+      call print_logical('  Compute radiances instead of fluxes','do_radiances', &
+           &             this%do_radiances)
       if (this%do_clouds) then
         write(nulout,'(a)') '  Clouds are ON'
       else
@@ -1710,7 +1756,17 @@ contains
           call print_real('    Overhang factor', &
                &   'overhang_factor', this%overhang_factor)
         end if
-
+      else if (this%i_solver_lw == ISolverTCRAD) then
+        write(nulout, '(a)') '  TCRAD options:'
+        call print_integer('    Number of regions', 'n_regions', this%nregions)
+        call print_integer('    Number of angles per hemisphere', 'n_angles_per_hemisphere_lw', &
+             &  this%n_angles_per_hemisphere_lw)
+        call print_logical('    Use Eddington scheme', 'use_tcrad_eddington', &
+             this%use_tcrad_eddington)
+        call print_logical('    Treat surface as specular reflector','do_specular_surface', &
+             &             this%do_specular_surface)
+        call print_logical('    3D effects are', 'do_3d_effects', &
+             &             this%do_3d_effects)
       else if (this%i_solver_sw == ISolverMcICA &
            &  .or. this%i_solver_lw == ISolverMcICA) then
         call print_logical('  Use vectorizable McICA cloud generator', &
