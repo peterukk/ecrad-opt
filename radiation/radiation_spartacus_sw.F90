@@ -1805,7 +1805,7 @@ pure subroutine write_gamma_diag(ng_sw_in, nlev, nreg, jreg, od_region, &
 
   integer :: jg
 
-  do jg = 1, n
+  do jg = 1, ng*nlev
     ! Write the diagonal elements of -Gamma1*z1
     Gamma_z1(jg,jreg,jreg) = od_region(jg)*gamma1(jg)
     ! Write the diagonal elements of +Gamma2*z1

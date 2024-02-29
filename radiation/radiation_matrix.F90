@@ -2049,7 +2049,9 @@ contains
 #endif
 
     if (lhook) call dr_hook('radiation_matrix:expm_sw',0,hook_handle)
-
+#ifdef USE_TIMING
+    ret =  gptlstart('expm_sw')
+#endif
     ! Compute the 1-norms of A
     normA = 0.0_jprb 
     do j3 = 1,9
@@ -2088,15 +2090,9 @@ contains
       ! call mat_square_sw_repeats(N,A,A2) 
       ! call mat_square_sw_repeats(N,A2,A4)
       ! call mat_x_mat_sw_repeats(N,A2,A4,A6) 
-#ifdef USE_TIMING
-    ret =  gptlstart('matrep')
-#endif
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A,A,A2)
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A2,A2,A4)
       call mat_x_mat_sw_repeats(ng_sw,nlev_b,A2,A4,A6) 
-#ifdef USE_TIMING
-    ret =  gptlstop('matrep')
-#endif
       do j3 = 1,9
         do j2 = 1,9
           if (.not.((j2>6) .and. (j3<7))) then
@@ -2202,7 +2198,9 @@ contains
         expo(jS:jE) = expo(jS:jE) - 1
       end if
     end do 
-
+#ifdef USE_TIMING
+    ret =  gptlstop('expm_sw')
+#endif
     if (lhook) call dr_hook('radiation_matrix:expm_sw',1,hook_handle)
 
   end subroutine expm_sw
