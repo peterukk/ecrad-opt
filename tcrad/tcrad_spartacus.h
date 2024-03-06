@@ -27,19 +27,23 @@ subroutine calc_radiance_trans_source_3d(ng_lw_in, nlev, &
      &  rate_up_top, rate_up_base, rate_dn_top, rate_dn_base, &
      &  source_up, source_dn)
 
-  use parkind1, only           : jprb, jprd 
+  use parkind1, only : jprb, jprd
   use yomhook,  only           : lhook, dr_hook, jphook
 #ifdef USE_TIMING
     ! Timing library
     use gptl,                  only: gptlstart, gptlstop
 #endif
-
-! Use double precision in this routine and subroutines? Toggled in tcrad_3region_solver.F90
-#ifdef USE_SPART_DP 
-#define jprm jprd 
-#else 
-#define jprm jprb
+#ifdef USE_SPART_DP
+    INTEGER, PARAMETER :: jprm = jprd
+#else
+    INTEGER, PARAMETER :: jprm = jprb
 #endif
+! Use double precision in this routine and subroutines? Toggled in tcrad_3region_solver.F90
+! #ifdef USE_SPART_DP 
+! #define jprm jprd 
+! #else 
+! #define jprm jprb
+! #endif
 
   real(jprm), parameter :: PI = acos(-1.0_jprm)
 

@@ -18,11 +18,11 @@
 !
 #define m NREGION
 
-#ifdef USE_SPART_DP 
-#define jprm jprd 
-#else 
-#define jprm jprb
-#endif
+! #ifdef USE_SPART_DP 
+! #define jprm jprd 
+! #else 
+! #define jprm jprb
+! #endif
 
 !---------------------------------------------------------------------
 ! Treat A as an m-by-m square matrix and b as n NREGION-element vectors
@@ -308,7 +308,12 @@ end subroutine diag_mat_right_divide_mask_3
 ! #ifndef USE_SPART_DP
 subroutine inv_tridiagonal(n, mat, ans)
 
-  use parkind1, only : jprb
+  use parkind1, only : jprb, jprd
+#ifdef USE_SPART_DP
+INTEGER, PARAMETER :: jprm = jprd
+#else
+INTEGER, PARAMETER :: jprm = jprb
+#endif
 
   integer,    intent(in)  :: n
   real(jprm), intent(in)  :: mat(n,3,3)
@@ -478,6 +483,11 @@ end subroutine expm_tridiagonal
 
   subroutine expm_tridiagonal(ng_lw_in, mat, A)
     use parkind1, only : jprb, jprd
+#ifdef USE_SPART_DP
+    INTEGER, PARAMETER :: jprm = jprd
+#else
+    INTEGER, PARAMETER :: jprm = jprb
+#endif
 
       integer,    intent(in)      :: ng_lw_in
       ! real(jprb), intent(in)      :: mat(ng,m,m)
@@ -592,7 +602,12 @@ end subroutine expm_tridiagonal
   end subroutine expm_tridiagonal
 
   pure subroutine mat_x_mat_3(ng,A,B,C)
-  use parkind1, only : jprm
+    use parkind1, only : jprb, jprd
+#ifdef USE_SPART_DP
+    INTEGER, PARAMETER :: jprm = jprd
+#else
+    INTEGER, PARAMETER :: jprm = jprb
+#endif
     integer,    intent(in)                          :: ng
     real(jprm), intent(in),     dimension(ng,3,3)  :: A, B
     !dir$ assume_aligned A:64, B:64
@@ -613,7 +628,12 @@ end subroutine expm_tridiagonal
   ! Solve AX=B optimized for 3x3 matrices, using LU factorization and
   ! substitution with no pivoting.
   pure subroutine solve_mat_3(ng_lw_in,A,B,X)
-    use parkind1, only : jprm
+    use parkind1, only : jprb, jprd
+#ifdef USE_SPART_DP
+    INTEGER, PARAMETER :: jprm = jprd
+#else
+    INTEGER, PARAMETER :: jprm = jprb
+#endif
     integer,    intent(in)  :: ng_lw_in
     real(jprm), intent(in)  :: A(ng,3,3)
     real(jprm), intent(in)  :: B(ng,3,3)
@@ -655,7 +675,12 @@ end subroutine expm_tridiagonal
   ! Square m-by-m matrix "A" nrepeat times. A will be corrupted by
   ! this function.
   function repeated_square(m,A,nrepeat,i_matrix_pattern)
-    use parkind1, only : jprm
+    use parkind1, only : jprb, jprd
+#ifdef USE_SPART_DP
+    INTEGER, PARAMETER :: jprm = jprd
+#else
+    INTEGER, PARAMETER :: jprm = jprb
+#endif
     integer,    intent(in)           :: m, nrepeat
     real(jprm), intent(inout)        :: A(m,m)
     integer,    intent(in), optional :: i_matrix_pattern

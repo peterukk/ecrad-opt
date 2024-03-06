@@ -509,7 +509,7 @@ contains
     real(jprb), dimension(ng,nreg) :: source_top, source_base
 
     ! Other working variables
-    real(jprb) :: secant, factor, coeff
+    real(jprb) :: secant, factor, coeff, scaling, coeffplus, coeffmin
 
     ! Maximum number of active regions in a layer (1 in a cloud-free layer)
     integer(jpim) :: max_reg
@@ -527,124 +527,123 @@ contains
     ! 0.5: half the scattering goes up and half down
     factor = 0.5_jprb * 3.0_jprb * mu / lw_diffusivity
 
-    rate_dn_top = 0.0_jprb 
+    if (present(rate_up_top) .and. present(rate_up_base) &
+      & .and. present(rate_dn_top) .and. present(rate_dn_base)) then
+        ! Optimized code
+        do jlev = 1,nlev
+          ! CHECK / FIX: is the source that per unit optical depth in the
+          ! vertical or along the direction to the sensor?
+  
+          ! Clear-sky region first
+          rate_up_top(:,1,jlev)  = planck_hl(:,jlev) * region_fracs(1,jlev)
+          rate_up_base(:,1,jlev) = planck_hl(:,jlev+1) * region_fracs(1,jlev)
+          rate_dn_top(:,1,jlev)  = planck_hl(:,jlev) * region_fracs(1,jlev)
+          rate_dn_base(:,1,jlev) = planck_hl(:,jlev+1) * region_fracs(1,jlev)
 
+          if (region_fracs(1,jlev) < 1.0_jprb) then
+            ! Cloudy layer: scale the Planck terms by the region fraction
+            ! and also by the single-scattering co-albedo
+            do jreg = 2, nreg 
+              do jg = 1, ng
+                scaling = (1.0_jprb - ssa(jg,jreg,jlev)) * region_fracs(jreg,jlev)
+                coeffplus =  0.5_jprb + factor*asymmetry(jg,jlev)
+                coeffmin  =  0.5_jprb - factor*asymmetry(jg,jlev)
 
-    do jlev = 1,nlev
+                ! Compute the rate of energy emitted or scattered in the
+                ! upward direction mu at the top and base of the layer
+                rate_up_top(jg,jreg,jlev) = planck_hl(jg,jlev)*scaling + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_top(jg,jreg,jlev) * coeffplus + flux_dn_top(jg,jreg,jlev) * coeffmin)
+                rate_up_base(jg,jreg,jlev) =  planck_hl(jg,jlev+1)*scaling  + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_base(jg,jreg,jlev) * coeffplus + flux_dn_base(jg,jreg,jlev) * coeffmin)        
 
-      ! CHECK / FIX: is the source that per unit optical depth in the
-      ! vertical or along the direction to the sensor?
+                ! Compute the rate of energy emitted or scattered in the
+                ! downward direction mu at the top and base of the layer
+                rate_dn_top(jg,jreg,jlev) = planck_hl(jg,jlev)*scaling + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_top(jg,jreg,jlev) * coeffmin + flux_dn_top(jg,jreg,jlev) * coeffplus)
+                rate_dn_base(jg,jreg,jlev) = planck_hl(jg,jlev+1)*scaling + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_base(jg,jreg,jlev) * coeffmin + flux_dn_base(jg,jreg,jlev) * coeffplus)     
+              end do 
+            end do 
+          end if
+  
+        end do
 
-      if (region_fracs(1,jlev) < 1.0_jprb) then
-        ! Cloudy layer: scale the Planck terms by the region fraction
-        ! and also by the single-scattering co-albedo
-        max_reg = nreg
-        planck_top(:,1) = planck_hl(:,jlev) * region_fracs(1,jlev)
-        planck_top(:,2:nreg) = spread(planck_hl(:,jlev),2,nreg-1) &
-             &  * (1.0_jprb - ssa(:,2:nreg,jlev)) &
-             &  * spread(region_fracs(2:nreg,jlev),1,ng)
-        planck_base(:,1) = planck_hl(:,jlev+1) * region_fracs(1,jlev)
-        planck_base(:,2:nreg) = spread(planck_hl(:,jlev+1),2,nreg-1) &
-             &  * (1.0_jprb - ssa(:,2:nreg,jlev)) &
-             &  * spread(region_fracs(2:nreg,jlev),1,ng)
-      else
-        ! Clear layer
-        max_reg = 1
-        planck_top(:,1)  = planck_hl(:,jlev)
-        planck_base(:,1) = planck_hl(:,jlev+1)
-        planck_top(:,2:) = 0.0_jprb 
-        planck_base(:,2:) = 0.0_jprb
-      end if
+    else 
 
-      if (present(rate_up_top) .and. present(rate_up_base)) then
-        ! Compute the rate of energy emitted or scattered in the
-        ! upward direction mu at the top and base of the layer: first
-        ! the Planck emission for all regions...
-        rate_up_top(:,:,jlev)  = planck_top
-        rate_up_base(:,:,jlev) = planck_base
-        ! ...then scattering from the scattering source function, but
-        ! only in cloudy regions
-        if (max_reg > 1) then
-          rate_up_top(:,2:nreg,jlev) = rate_up_top(:,2:nreg,jlev) &
-               &  + ssa(:,2:nreg,jlev) &
-               &  * (flux_up_top(:,2:nreg,jlev) &
-               &     * (0.5_jprb + factor*spread(asymmetry(:,jlev),2,nreg-1)) &
-               &    +flux_dn_top(:,2:nreg,jlev) &
-               &     * (0.5_jprb - factor*spread(asymmetry(:,jlev),2,nreg-1)))
-          rate_up_base(:,2:nreg,jlev) = rate_up_base(:,2:nreg,jlev) &
-               &  + ssa(:,2:nreg,jlev) &
-               &  * (flux_up_base(:,2:nreg,jlev) &
-               &     * (0.5_jprb + factor*spread(asymmetry(:,jlev),2,nreg-1)) &
-               &    +flux_dn_base(:,2:nreg,jlev) &
-               &     * (0.5_jprb - factor*spread(asymmetry(:,jlev),2,nreg-1)))
+      do jlev = 1,nlev
+
+        ! CHECK / FIX: is the source that per unit optical depth in the
+        ! vertical or along the direction to the sensor?
+
+        if (region_fracs(1,jlev) < 1.0_jprb) then
+          ! Cloudy layer: scale the Planck terms by the region fraction
+          ! and also by the single-scattering co-albedo
+          max_reg = nreg
+          planck_top(:,1) = planck_hl(:,jlev) * region_fracs(1,jlev)
+          planck_base(:,1) = planck_hl(:,jlev+1) * region_fracs(1,jlev)
+          do jreg = 2, nreg 
+            do jg = 1, ng
+              coeff = (1.0_jprb - ssa(jg,jreg,jlev)) * region_fracs(jreg,jlev)
+              planck_top(jg,jreg) = planck_hl(jg,jlev) * coeff 
+              planck_base(jg,jreg) = planck_hl(jg,jlev+1) * coeff
+              end do 
+          end do 
+        else
+          ! Clear layer
+          max_reg = 1
+          planck_top(:,1)  = planck_hl(:,jlev)
+          planck_base(:,1) = planck_hl(:,jlev+1)
+          planck_top(:,2:) = 0.0_jprb 
+          planck_base(:,2:) = 0.0_jprb
         end if
-      end if
-      ! if (jlev==1) then 
-      !   print *, "001 rate,", rate_dn_top(29,2,1),"regfrac", region_fracs(2,1), "clear", region_fracs(1,1),"fac", factor, "ssa", ssa(29,2,1), &
-      !        & "asym", asymmetry(29,jlev), "flux", flux_up_top(29,2,jlev), flux_dn_top(29,2,jlev),  "maxreg", max_reg
-      !   print *, " PLANKC TOP", planck_top(29,2)
-      ! end if
-      if (present(rate_dn_top) .and. present(rate_dn_base)) then
-        ! Compute the rate of energy emitted or scattered in the
-        ! downward direction mu at the top and base of the layer:
-        ! first the Planck emission for all regions...
-        rate_dn_top(:,:,jlev)  = planck_top
-        rate_dn_base(:,:,jlev) = planck_base
-        ! ...then scattering from the scattering source function, but
-        ! only in cloudy regions
-        if (max_reg > 1) then
-          rate_dn_top(:,2:nreg,jlev) = rate_dn_top(:,2:nreg,jlev) &
-               &  + ssa(:,2:nreg,jlev) &
-               &  * (flux_up_top(:,2:nreg,jlev) &
-               &     * (0.5_jprb - factor*spread(asymmetry(:,jlev),2,nreg-1)) &
-               &    +flux_dn_top(:,2:nreg,jlev) &
-               &     * (0.5_jprb + factor*spread(asymmetry(:,jlev),2,nreg-1)))
-          ! if (maxval(rate_dn_top(:,2:nreg,jlev))>200.0_jprb) then 
-          !   print *, "maxv", maxval(rate_dn_top(:,3,jlev))
-          !   print *, "loc", maxloc(rate_dn_top(:,2:nreg,jlev))
-          !   print *, "jlev", jlev,maxval(rate_dn_top),"regfrac", region_fracs(1,jlev), "fac", factor, "minm ssa", minval(ssa(:,2:nreg,jlev)), &
-          !       & maxval(ssa(:,2:nreg,jlev)), "asym", minval(asymmetry(:,jlev)), maxval(asymmetry(:,jlev))
-          !   ! print *, "maxv", maxval(rate_dn_top(:,3,jlev))
-          !   ! print *, "jlev", jlev,rate_dn_top(3,2,jlev),"regfrac", region_fracs(2,jlev), "fac", factor, "ssa", ssa(3,2,jlev), &
-          !   !     & ssa(3,2,jlev), "asym", asymmetry(3,jlev), "flux", flux_up_top(3,2,jlev), flux_dn_top(3,2,jlev)
-          ! end if 
-          rate_dn_base(:,2:nreg,jlev) = rate_dn_base(:,2:nreg,jlev) &
-               &  + ssa(:,2:nreg,jlev) &
-               &  * (flux_up_base(:,2:nreg,jlev) &
-               &     * (0.5_jprb - factor*spread(asymmetry(:,jlev),2,nreg-1)) &
-               &    +flux_dn_base(:,2:nreg,jlev) &
-               &     * (0.5_jprb + factor*spread(asymmetry(:,jlev),2,nreg-1)))
 
+        if (present(rate_up_top) .and. present(rate_up_base)) then
+          ! Compute the rate of energy emitted or scattered in the
+          ! upward direction mu at the top and base of the layer: first
+          ! the Planck emission for all regions...
+          rate_up_top(:,1,jlev)  = planck_top(:,1)
+          rate_up_base(:,1,jlev) = planck_base(:,1)
+          ! ...then scattering from the scattering source function, but
+          ! only in cloudy regions
+          if (max_reg > 1) then
+            do jreg = 2, nreg 
+              do jg = 1, ng 
+                coeffplus =  0.5_jprb + factor*asymmetry(jg,jlev)
+                coeffmin =  0.5_jprb - factor*asymmetry(jg,jlev)
+
+                rate_up_top(jg,jreg,jlev) = planck_top(jg,jreg) + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_top(jg,jreg,jlev) * coeffplus + flux_dn_top(jg,jreg,jlev) * coeffmin)
+                rate_up_base(jg,jreg,jlev) = planck_base(jg,jreg) + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_base(jg,jreg,jlev) * coeffplus + flux_dn_base(jg,jreg,jlev) * coeffmin)    
+              end do 
+            end do 
+          end if
         end if
-        ! if (maxval(rate_dn_top(:,:,jlev))>200.0_jprb) then 
-        !   ! print *, "maxv", maxval(rate_dn_top(:,3,jlev))
-        !   jmax = maxloc(rate_dn_top(:,:,jlev))
-        !   print *, "loc", jmax
-        !   ! print *, "jlev", jlev,maxval(rate_dn_top),"regfrac", region_fracs(1,jlev), "fac", factor, "minm ssa", minval(ssa(:,2:nreg,jlev)), &
-        !   !     & maxval(ssa(:,2:nreg,jlev)), "asym", minval(asymmetry(:,jlev)), maxval(asymmetry(:,jlev))
-        !   print *, "val", rate_dn_top(jmax(1),jmax(2),jlev)
-        !   print *, "jlev", jlev,rate_dn_top(jmax(1),jmax(2),jlev),"regfrac", region_fracs(jmax(2),jlev), "fac", &
-        !     &  factor, "ssa", ssa(jmax(1),jmax(2),jlev), &
-        !       & "asym", asymmetry(jmax(1),jlev), "flux", flux_up_top(jmax(1),jmax(2),jlev), flux_dn_top(jmax(1),jmax(2),jlev)
-        ! end if 
-      end if
-      ! if (jlev==1) then 
-      !   print *, "111 rate,", rate_dn_top(29,2,1),"regfrac", region_fracs(2,1), "clear", region_fracs(1,1),"fac", factor, "ssa", ssa(29,2,1), &
-      !        & "asym", asymmetry(29,jlev), "flux", flux_up_top(29,2,jlev), flux_dn_top(29,2,jlev),  "maxreg", max_reg
-      ! end if
-      ! print *, "jlev", jlev 
-      ! print *, "max at jlev", maxval(rate_dn_top(:,:,jlev))
-      ! if (jlev==1) then 
-      !  print *, "fin rate jlev 1", maxval(rate_dn_top(:,2,jlev))
-      ! end if 
-    end do
-    ! print *, "rate", rate_dn_top(29,2,1)
-    ! jlev = 1
-    ! print *, "rate fin", rate_dn_top(29,2,1),"regfrac", region_fracs(2,1), "clear", region_fracs(1,1),"fac", factor, "ssa", ssa(29,2,1), &
-    !         & "asym", asymmetry(29,jlev), "flux", flux_up_top(29,2,jlev), flux_dn_top(29,2,jlev)
+        if (present(rate_dn_top) .and. present(rate_dn_base)) then
+          ! Compute the rate of energy emitted or scattered in the
+          ! downward direction mu at the top and base of the layer:
+          ! first the Planck emission for all regions...
+          rate_dn_top(:,1,jlev)  = planck_top(:,1)
+          rate_dn_base(:,1,jlev) = planck_base(:,1)
+          ! ...then scattering from the scattering source function, but
+          ! only in cloudy regions
+          if (max_reg > 1) then
+            do jreg = 2, nreg 
+              do jg = 1, ng 
+                coeffmin =  0.5_jprb - factor*asymmetry(jg,jlev)
+                coeffplus =  0.5_jprb + factor*asymmetry(jg,jlev)
 
-    if (maxval(rate_dn_top)>200.0_jprb) print *, "MAX>200 in CLR", maxloc(rate_dn_top), "val", maxval(rate_dn_top)
+                rate_dn_top(jg,jreg,jlev) = planck_top(jg,jreg) + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_top(jg,jreg,jlev) * coeffmin + flux_dn_top(jg,jreg,jlev) * coeffplus)
+                rate_dn_base(jg,jreg,jlev) = planck_base(jg,jreg) + ssa(jg,jreg,jlev) &
+                    &  * (flux_up_base(jg,jreg,jlev) * coeffmin + flux_dn_base(jg,jreg,jlev) * coeffplus)
+              end do 
+            end do 
 
+          end if
+        end if
+      end do
+    end if 
     if (lhook) call dr_hook('tcrad:calc_radiance_rates',1,hook_handle)
 
   end subroutine calc_radiance_rates
