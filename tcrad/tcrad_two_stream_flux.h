@@ -23,7 +23,7 @@
 ! layer sources, and precomputed upward and downward cloud overlap
 ! matrices, using the Tripleclouds two-stream method of Shonk and
 ! Hogan (2008).
-subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
+subroutine calc_two_stream_flux(ng_lw_in, nlev, surf_emission, surf_albedo, &
      &  reflectance, transmittance, source_up, source_dn, &
      &  is_cloud_free_layer, u_overlap, v_overlap, &
      &  flux_up_base, flux_dn_base, flux_up_top, flux_dn_top)
@@ -36,23 +36,23 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
   ! Inputs
 
   ! Number of spectral intervals and levels
-  integer(jpim), intent(in) :: nspec, nlev
+  integer(jpim), intent(in) :: ng_lw_in, nlev
 
   ! Surface upwards emission, in W m-2 (i.e. emissivity multiplied by
   ! Planck function at the surface skin temperature) integrated across
   ! each spectral interval, and albedo in the same intervals
-  real(jprb), intent(in),  dimension(nspec) :: surf_emission, surf_albedo
+  real(jprb), intent(in),  dimension(ng) :: surf_emission, surf_albedo
   
   ! Reflectance and transmittance of each layer and region
-  real(jprb), intent(in),  dimension(nspec,NREGION,nlev) :: reflectance
-  real(jprb), intent(in),  dimension(nspec,NREGION,nlev) :: transmittance
+  real(jprb), intent(in),  dimension(ng,NREGION,nlev) :: reflectance
+  real(jprb), intent(in),  dimension(ng,NREGION,nlev) :: transmittance
 
   ! Rate of emission upward from the top of a layer and downwards from
   ! its base, due to emission within the layer, in Watts of power per
   ! square metre of the entire gridbox, so the energy is scaled by the
   ! size of each region
-  real(jprb), intent(in),  dimension(nspec,NREGION,nlev) :: source_up
-  real(jprb), intent(in),  dimension(nspec,NREGION,nlev) :: source_dn
+  real(jprb), intent(in),  dimension(ng,NREGION,nlev) :: source_up
+  real(jprb), intent(in),  dimension(ng,NREGION,nlev) :: source_dn
 
   ! Where are the cloud free layers?  Includes dummy layers at 0 and
   ! nlev+1 which are also cloud free
@@ -67,8 +67,8 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
   ! in the regions of that layer, in Watts of power per square metre
   ! of the entire gridbox, so the energy is scaled by the size of each
   ! region
-  real(jprb), intent(out), dimension(nspec,NREGION,nlev) :: flux_up_base, flux_dn_base
-  real(jprb), intent(out), dimension(nspec,NREGION,nlev) :: flux_up_top, flux_dn_top
+  real(jprb), intent(out), dimension(ng,NREGION,nlev) :: flux_up_base, flux_dn_base
+  real(jprb), intent(out), dimension(ng,NREGION,nlev) :: flux_up_top, flux_dn_top
   
   ! Local variables
 
@@ -76,24 +76,24 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
   ! interface with respect to downwelling diffuse radiation at that
   ! interface, where level index = 1 corresponds to the
   ! top-of-atmosphere
-  real(jprb), dimension(nspec, NREGION, nlev+1) :: total_albedo
+  real(jprb), dimension(ng, NREGION, nlev+1) :: total_albedo
 
   ! Upwelling radiation just above a layer interface due to emission
   ! below that interface, where level index = 1 corresponds to the
   ! top-of-atmosphere
-  real(jprb), dimension(nspec, NREGION, nlev+1) :: total_source
+  real(jprb), dimension(ng, NREGION, nlev+1) :: total_source
 
   ! Total albedo and source of the atmosphere just below a layer interface
-  real(jprb), dimension(nspec, NREGION) :: total_albedo_below, total_source_below
+  real(jprb), dimension(ng, NREGION) :: total_albedo_below, total_source_below
 
   ! Term in the adding method to replace divisions by multiplications
-  real(jprb), dimension(nspec, NREGION) :: inv_denom
+  real(jprb), dimension(ng, NREGION) :: inv_denom
 
   ! Index of highest layer containing cloud
   integer(jpim) :: icloudtop
 
   ! Loop indices for spectral interval, level and region
-  integer(jpim) :: jspec, jlev, jreg, jreg2
+  integer(jpim) :: jg, jlev, jreg, jreg2
 
   real(jphook) :: hook_handle
 
@@ -140,9 +140,9 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
   ! Calculate the upwelling radiation emitted by the surface, and copy
   ! the surface albedo into total_albedo
   do jreg = 1,NREGION
-    do jspec = 1,nspec
-      total_source(jspec,jreg,nlev+1) = u_overlap(jreg,1,nlev+1)*surf_emission(jspec)
-      total_albedo(jspec,jreg,nlev+1) = surf_albedo(jspec)
+    do jg = 1,ng
+      total_source(jg,jreg,nlev+1) = u_overlap(jreg,1,nlev+1)*surf_emission(jg)
+      total_albedo(jg,jreg,nlev+1) = surf_albedo(jg)
     end do
   end do
 
@@ -155,16 +155,16 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
     if (is_cloud_free_layer(jlev)) then
       total_albedo_below = 0.0_jprb
       total_source_below = 0.0_jprb
-      do jspec = 1,nspec
-        inv_denom(jspec,1) = 1.0_jprb &
-             &  / (1.0_jprb - total_albedo(jspec,1,jlev+1)*reflectance(jspec,1,jlev))
-        total_albedo_below(jspec,1) = reflectance(jspec,1,jlev) &
-             &  + transmittance(jspec,1,jlev)*transmittance(jspec,1,jlev)*total_albedo(jspec,1,jlev+1) &
-             &  * inv_denom(jspec,1)
-        total_source_below(jspec,1) = source_up(jspec,1,jlev) &
-             &  + transmittance(jspec,1,jlev)*(total_source(jspec,1,jlev+1) &
-             &  + total_albedo(jspec,1,jlev+1)*source_dn(jspec,1,jlev)) &
-             &  * inv_denom(jspec,1)
+      do jg = 1,ng
+        inv_denom(jg,1) = 1.0_jprb &
+             &  / (1.0_jprb - total_albedo(jg,1,jlev+1)*reflectance(jg,1,jlev))
+        total_albedo_below(jg,1) = reflectance(jg,1,jlev) &
+             &  + transmittance(jg,1,jlev)*transmittance(jg,1,jlev)*total_albedo(jg,1,jlev+1) &
+             &  * inv_denom(jg,1)
+        total_source_below(jg,1) = source_up(jg,1,jlev) &
+             &  + transmittance(jg,1,jlev)*(total_source(jg,1,jlev+1) &
+             &  + total_albedo(jg,1,jlev+1)*source_dn(jg,1,jlev)) &
+             &  * inv_denom(jg,1)
       end do
     else
       inv_denom = 1.0_jprb / (1.0_jprb - total_albedo(:,:,jlev+1)*reflectance(:,:,jlev))
@@ -183,7 +183,7 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
       total_albedo(:,:,jlev) = total_albedo_below(:,:)
       total_source(:,:,jlev) = total_source_below(:,:)
     else
-      total_source(:,:,jlev) = singlemat_x_vec(nspec,&
+      total_source(:,:,jlev) = singlemat_x_vec(ng,&
            &  u_overlap(:,:,jlev), total_source_below)
       ! Use overlap matrix and exclude "anomalous" horizontal
       ! transport described by Shonk & Hogan (2008).  Therefore, the
@@ -240,15 +240,15 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
   do jlev = icloudtop,nlev
 
     if (is_cloud_free_layer(jlev)) then
-      do jspec = 1,nspec
-        flux_dn_base(jspec,1,jlev) = (transmittance(jspec,1,jlev)*flux_dn_top(jspec,1,jlev) &
-             &  + reflectance(jspec,1,jlev)*total_source(jspec,1,jlev+1) &
-             &  + source_dn(jspec,1,jlev) ) &
-             &  / (1.0_jprb - reflectance(jspec,1,jlev)*total_albedo(jspec,1,jlev+1))
-        flux_up_base(jspec,1,jlev) = total_source(jspec,1,jlev+1) &
-             &  + flux_dn_base(jspec,1,jlev)*total_albedo(jspec,1,jlev+1)
-        flux_up_top(jspec,1,jlev) = flux_up_base(jspec,1,jlev)*transmittance(jspec,1,jlev) &
-             &  + source_up(jspec,1,jlev) + flux_dn_top(jspec,1,jlev)*reflectance(jspec,1,jlev)
+      do jg = 1,ng
+        flux_dn_base(jg,1,jlev) = (transmittance(jg,1,jlev)*flux_dn_top(jg,1,jlev) &
+             &  + reflectance(jg,1,jlev)*total_source(jg,1,jlev+1) &
+             &  + source_dn(jg,1,jlev) ) &
+             &  / (1.0_jprb - reflectance(jg,1,jlev)*total_albedo(jg,1,jlev+1))
+        flux_up_base(jg,1,jlev) = total_source(jg,1,jlev+1) &
+             &  + flux_dn_base(jg,1,jlev)*total_albedo(jg,1,jlev+1)
+        flux_up_top(jg,1,jlev) = flux_up_base(jg,1,jlev)*transmittance(jg,1,jlev) &
+             &  + source_up(jg,1,jlev) + flux_dn_top(jg,1,jlev)*reflectance(jg,1,jlev)
       end do
     else
       flux_dn_base(:,:,jlev) = (transmittance(:,:,jlev)*flux_dn_top(:,:,jlev) &
@@ -264,7 +264,7 @@ subroutine calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
       if (.not. (is_cloud_free_layer(jlev) .and. is_cloud_free_layer(jlev+1))) then
         ! Account for overlap rules in translating fluxes just above a
         ! layer interface to the values just below
-        flux_dn_top(:,:,jlev+1) = singlemat_x_vec(nspec, &
+        flux_dn_top(:,:,jlev+1) = singlemat_x_vec(ng, &
              &  v_overlap(:,:,jlev+1), flux_dn_base(:,:,jlev))
       else 
         ! Two clear-sky layers: copy the fluxes

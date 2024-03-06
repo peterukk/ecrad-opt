@@ -347,7 +347,7 @@ module radiation_config
     logical :: do_sw_direct = .true.
 
     ! Do we include 3D effects?
-    logical :: do_3d_effects = .true.
+    logical :: do_3d_effects = .false.
 
     ! Do we compute radiances for simulating satellite or surface
     ! radiometer observations, instead of fluxes?  Only available in

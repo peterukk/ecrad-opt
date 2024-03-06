@@ -22,7 +22,7 @@
 ! Compute the flux profile including the effects of scattering, either
 ! using the classic Tripleclouds solver alone, or using it to compute
 ! the source function for subsequent radiance calculations.
-subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
+subroutine calc_flux(ng_lw_in, nlev, surf_emission, surf_albedo, planck_hl, &
      &  cloud_fraction, &
 #if NUM_REGIONS == 3
      &  fractional_std, &
@@ -33,7 +33,8 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
      &  cloud_cover, &
      &  n_angles_per_hem, &
      &  layer_thickness, inv_cloud_scale, &
-     &  inv_cloud_scale_up, inv_cloud_scale_dn);
+     &  inv_cloud_scale_up, inv_cloud_scale_dn, &
+     &  max_cloud_od_lw);
 
   use parkind1, only           : jpim, jprb
   use yomhook,  only           : lhook, dr_hook, jphook
@@ -41,7 +42,10 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
        &  calc_radiance_rates, calc_radiance_trans_source, gauss_legendre, &
        &  lw_diffusivity, MAX_GAUSS_LEGENDRE_POINTS
   use tcrad_tilted, only       : calc_tilted_overlap
-
+#ifdef USE_TIMING
+    ! Timing library
+    use gptl,                  only: gptlstart, gptlstop
+#endif
   implicit none
 
   enum, bind(c)
@@ -53,17 +57,17 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
 
   ! Number of spectral intervals and levels. Note that all
   ! level-dependent variables count down from top-of-atmosphere.
-  integer(jpim), intent(in) :: nspec, nlev
+  integer(jpim), intent(in) :: ng_lw_in, nlev
 
   ! Surface upwards emission, in W m-2 (i.e. emissivity multiplied
   ! by Planck function at the surface skin temperature) integrated
   ! across each spectral interval, and albedo in the same intervals
-  real(jprb), intent(in), dimension(nspec) :: surf_emission, surf_albedo
+  real(jprb), intent(in), dimension(ng) :: surf_emission, surf_albedo
 
   ! Planck function integrated over each spectral interval at each
   ! half-level, in W m-2 (i.e. the flux emitted by a horizontal
   ! black-body surface)
-  real(jprb), intent(in), dimension(nspec,nlev+1) :: planck_hl
+  real(jprb), intent(in), dimension(ng,nlev+1) :: planck_hl
 
   ! Profile of cloud fraction 
   real(jprb), intent(in), dimension(nlev) :: cloud_fraction
@@ -76,13 +80,13 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
 #endif
 
   ! Layer optical depth of gas and aerosol
-  real(jprb), intent(in), dimension(nspec,nlev) :: od_clear
+  real(jprb), intent(in), dimension(ng,nlev) :: od_clear
 
   ! Layer optical depth of cloud averaged only over the cloudy part
   ! of the gridbox, single scattering albedo and asymmetry
   ! factor. If delta-Eddington scaling is required then this should
   ! already have been done.
-  real(jprb), intent(in), dimension(nspec,nlev) :: od_cloud, &
+  real(jprb), intent(in), dimension(ng,nlev) :: od_cloud, &
        &  ssa_cloud, asymmetry_cloud
 
   ! Overlap parameter governing how clouds in adjacent layers are
@@ -95,7 +99,7 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
 
   ! Upwelling and downwelling fluxes in each spectral interval at
   ! each half-level (W m-2)
-  real(jprb), intent(out), dimension(nspec,nlev+1) :: flux_up, flux_dn
+  real(jprb), intent(out), dimension(ng,nlev+1) :: flux_up, flux_dn
 
   ! Return cloud cover computed from cloud fraction profile and
   ! overlap rules
@@ -123,31 +127,32 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
   ! kind of "shadowing" effect
   real(jprb), intent(in), optional :: inv_cloud_scale_up(nlev)
   real(jprb), intent(in), optional :: inv_cloud_scale_dn(nlev)
+  real(jprb), intent(in), optional :: max_cloud_od_lw 
 
   ! Local variables
 
   ! Combined gas/aerosol/cloud optical depth in each region
-  real(jprb), dimension(nspec,NREGION,nlev)   :: od
+  real(jprb), dimension(ng,NREGION,nlev)   :: od
 
   ! Single scattering albedo of the cloudy regions (ssa=0 in the
   ! clear region)
-  real(jprb), dimension(nspec,2:NREGION,nlev) :: ssa
+  real(jprb), dimension(ng,2:NREGION,nlev) :: ssa
 
   ! Reflectance and transmittance of each layer and region
-  real(jprb), dimension(nspec,NREGION,nlev) :: reflectance, transmittance
+  real(jprb), dimension(ng,NREGION,nlev) :: reflectance, transmittance
 
   ! Transmission matrix for 3D effects
-  real(jprb), dimension(nspec,NREGION,NREGION,nlev) :: transmittance_mat
+  real(jprb), dimension(ng,NREGION,NREGION,nlev) :: transmittance_mat
 
   ! Rate of emission/scattering up from the top or down through the
   ! base of each layer and region (W m-2)
-  real(jprb), dimension(nspec,NREGION,nlev) :: source_up, source_dn
+  real(jprb), dimension(ng,NREGION,nlev) :: source_up, source_dn
 
   ! Rate of emission/scattering in the direction of a particular
   ! radiance at the top and base of each layer and region, per unit
   ! optical depth (W m-2), used for 3D radiances
-  real(jprb), dimension(nspec,NREGION,nlev) :: rate_up_top, rate_up_base
-  real(jprb), dimension(nspec,NREGION,nlev) :: rate_dn_top, rate_dn_base
+  real(jprb), dimension(ng,NREGION,nlev) :: rate_up_top, rate_up_base
+  real(jprb), dimension(ng,NREGION,nlev) :: rate_dn_top, rate_dn_base
 
   ! Which layers are cloud-free?  Dummy cloud-free layers are added
   ! above TOA (level 0) and below the ground (level nlev+1).
@@ -162,8 +167,8 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
 
   ! Upwelling and downwelling fluxes at the top and base of each
   ! layer in each region, in W m-2
-  real(jprb), dimension(nspec,NREGION,nlev) :: flux_up_base, flux_dn_base
-  real(jprb), dimension(nspec,NREGION,nlev) :: flux_up_top, flux_dn_top
+  real(jprb), dimension(ng,NREGION,nlev) :: flux_up_base, flux_dn_base
+  real(jprb), dimension(ng,NREGION,nlev) :: flux_up_top, flux_dn_top
 
   ! Cloud optical depth scaling in each cloudy region
   real(jprb) :: od_scaling(2:NREGION,nlev)
@@ -197,10 +202,13 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
   ! Local version of an optional argument
   integer(jpim) :: n_angles_per_hem_local
 
-  ! Loop indices for region and stream
-  integer(jpim) :: jreg, jstream
+  ! Loop indices
+  integer(jpim) :: jg, jlev, jreg, jstream
 
   real(jphook) :: hook_handle
+#ifdef USE_TIMING
+    integer :: ret
+#endif
 
   if (lhook) call dr_hook('tcrad:calc_flux',0,hook_handle)
 
@@ -240,15 +248,31 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
          &                      inv_cloud_scale_dn, region_edge_area_dn)
   end if
 
+  ! Identify cloud-free layers
+  is_cloud_free_layer(0) = .true.
+  is_cloud_free_layer(1:nlev) = (region_fracs(1,:) == 1.0_jprb)
+  ! is_cloud_free_layer(1:nlev) = (cloud_fraction(1:nlev) == 0.0_jprb)
+  is_cloud_free_layer(nlev+1) = .true.
   ! Compute wavelength-independent overlap matrices u_overlap and
   ! v_overlap
-  call calc_overlap_matrices(nlev, &
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_overlap_matrices')
+#endif  
+  ! call calc_overlap_matrices(nlev, &
+  !      &  region_fracs, overlap_param, &
+  !      &  u_overlap, v_overlap, &
+  !      &  0.5_jprb, &
+  !      &  cloud_fraction_threshold, &
+  !      &  cloud_cover)
+  call calc_overlap_matrices_nocol_dp(nlev, is_cloud_free_layer, &
        &  region_fracs, overlap_param, &
        &  u_overlap, v_overlap, &
        &  0.5_jprb, &
        &  cloud_fraction_threshold, &
        &  cloud_cover)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_overlap_matrices')
+#endif 
   ! Average gas and cloud properties noting that: (1) region 1 is
   ! cloud-free so we copy over the gas optical depth; (2) gases only
   ! absorb so the single scattering albedo (ssa) of region is
@@ -258,29 +282,54 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
   ! regardless of the optical depth scaling (od_scaling) so we
   ! simply use the asymmetry_cloud variable when calculating
   ! reflectance and transmittance.
+#ifdef USE_TIMING
+    ret =  gptlstart('prepare_opt_props')
+#endif  
   od(:,1,:) = od_clear
   do jreg = 2,NREGION
-    od(:,jreg,:) = od_clear + od_cloud*spread(od_scaling(jreg,:),1,nspec)
+    od(:,jreg,:) = od_clear + od_cloud*spread(od_scaling(jreg,:),1,ng)
     ssa(:,jreg,:) = ssa_cloud(:,:)*od_cloud(:,:) &
-         &  * spread(od_scaling(jreg,:),1,nspec) / od(:,jreg,:)
+         &  * spread(od_scaling(jreg,:),1,ng) / od(:,jreg,:)
   end do
-
-  ! Identify cloud-free layers
-  is_cloud_free_layer(0) = .true.
-  is_cloud_free_layer(1:nlev) = (region_fracs(1,:) == 1.0_jprb)
-  is_cloud_free_layer(nlev+1) = .true.
-
+#ifdef USE_TIMING
+    ret =  gptlstop('prepare_opt_props')
+#endif 
+  ! ! Identify cloud-free layers
+  ! is_cloud_free_layer(0) = .true.
+  ! is_cloud_free_layer(1:nlev) = (region_fracs(1,:) == 1.0_jprb)
+  ! is_cloud_free_layer(nlev+1) = .true.
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_reflectance_transmittance')
+#endif 
   ! Compute layer-wise properties
-  call calc_reflectance_transmittance(nspec, nlev, NREGION, &
+  ! Scattering in clear-sky flux calculation
+  call calc_reflectance_transmittance(ng, nlev, NREGION, &
        &  region_fracs, planck_hl, od, ssa, asymmetry_cloud, &
        &  reflectance, transmittance, source_up, source_dn)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_reflectance_transmittance')
+#endif 
   ! Classic Tripleclouds method to compute flux profile
-  call calc_two_stream_flux(nspec, nlev, surf_emission, surf_albedo, &
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_two_stream_flux')
+#endif 
+  call calc_two_stream_flux(ng, nlev, surf_emission, surf_albedo, &
        &  reflectance, transmittance, source_up, source_dn, &
        &  is_cloud_free_layer, u_overlap, v_overlap, &
        &  flux_up_base, flux_dn_base, flux_up_top, flux_dn_top)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_two_stream_flux')
+#endif 
+  if (present(max_cloud_od_lw)) then
+     ! Apply maximum cloud optical depth for stability in the 3D case
+     do jreg = 1,NREGION
+       do jlev = 1, nlev 
+         do jg = 1, ng
+            od(jg,jreg,jlev) = min(od(jg,jreg,jlev), max_cloud_od_lw)
+         end do 
+       end do 
+     end do 
+  end if 
   if (n_angles_per_hem_local > 0) then
     ! Fu et al. (1997) method: pass N beams through the
     ! atmosphere using the two-stream solution as the scattering
@@ -302,46 +351,63 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
            &          * mu_list(1:n_angles_per_hem_local))
       ! Radiances are computed in pairs: up and down with same
       ! absolute zenith angle
-      call calc_radiance_rates(nspec, nlev, NREGION, &
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_radiance_rates')
+#endif  
+      call calc_radiance_rates(ng, nlev, NREGION, &
            &  mu_list(jstream), &
            &  region_fracs, planck_hl, ssa, asymmetry_cloud, &
            &  flux_up_base, flux_dn_base, flux_up_top, flux_dn_top, &
            &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
            &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_radiance_rates')
+#endif  
       if (mode_3d == MODE_3D_SPARTACUS) then
-        call calc_radiance_trans_source_3d(nspec, nlev, &
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_radiance_trans_source_3d')
+#endif 
+        call calc_radiance_trans_source_3d(ng, nlev, &
              &  mu_list(jstream), region_fracs, region_edge_area, od, &
              &  transmittance_mat, &
              &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
              &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base, &
              &  source_up=source_up, source_dn=source_dn)
-        call calc_radiance_dn_3d(nspec, nlev, weight, &
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_radiance_trans_source_3d')
+#endif 
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_radiance_dn_up')
+#endif 
+        call calc_radiance_dn_3d(ng, nlev, weight, &
              &  transmittance_mat, source_dn, &
              &  v_overlap, flux_dn)
-        call calc_radiance_up_3d(nspec, nlev, weight, &
+        call calc_radiance_up_3d(ng, nlev, weight, &
              &  flux_up_base(:,:,nlev), &
              &  transmittance_mat, source_up, &
              &  u_overlap, flux_up)
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_radiance_dn_up')
+#endif 
       else if (mode_3d == MODE_3D_SPARTACUS_SHADOW) then
         ! Transmittance matrix is computed separately for the upward
         ! and downward 3D beams
-        call calc_radiance_trans_source_3d(nspec, nlev, &
+        call calc_radiance_trans_source_3d(ng, nlev, &
              &  mu_list(jstream), region_fracs, region_edge_area_dn, od, &
              &  transmittance_mat, &
              &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
              &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base, &
              &  source_dn=source_dn)
-        call calc_radiance_dn_3d(nspec, nlev, weight, &
+        call calc_radiance_dn_3d(ng, nlev, weight, &
              &  transmittance_mat, source_dn, &
              &  v_overlap, flux_dn)
-        call calc_radiance_trans_source_3d(nspec, nlev, &
+        call calc_radiance_trans_source_3d(ng, nlev, &
              &  mu_list(jstream), region_fracs, region_edge_area, od, &
              &  transmittance_mat, &
              &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
              &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base, &
              &  source_up=source_up)
-        call calc_radiance_up_3d(nspec, nlev, weight, &
+        call calc_radiance_up_3d(ng, nlev, weight, &
              &  flux_up_base(:,:,nlev), &
              &  transmittance_mat, source_up, &
              &  u_overlap, flux_up)
@@ -356,31 +422,43 @@ subroutine calc_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
              &  u_overlap, v_overlap, &
              &  0.5_jprb, &
              &  cloud_fraction_threshold)
-        call calc_radiance_trans_source(nspec, nlev, NREGION, &
+        call calc_radiance_trans_source(ng, nlev, NREGION, &
              &  mu_list(jstream), region_fracs, od, &
              &  transmittance, &
              &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
              &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base, &
              &  source_up=source_up, source_dn=source_dn)
-        call calc_radiance_dn(nspec, nlev, &
+        call calc_radiance_dn(ng, nlev, &
              &  weight, &
              &  transmittance, source_dn, v_overlap, flux_dn)
-        call calc_radiance_up(nspec, nlev, &
+        call calc_radiance_up(ng, nlev, &
              &  weight, flux_up_base(:,:,nlev), &
              &  transmittance, source_up, u_overlap, flux_up)
       else ! Standard 1D Tripleclouds
-        call calc_radiance_trans_source(nspec, nlev, NREGION, &
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_radiance_trans_source')
+#endif  
+        call calc_radiance_trans_source(ng, nlev, NREGION, &
              &  mu_list(jstream), region_fracs, od, &
              &  transmittance, &
              &  rate_up_top=rate_up_top, rate_up_base=rate_up_base, &
              &  rate_dn_top=rate_dn_top, rate_dn_base=rate_dn_base, &
              &  source_up=source_up, source_dn=source_dn)
-        call calc_radiance_dn(nspec, nlev, &
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_radiance_trans_source')
+#endif  
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_radiance_dn_up')
+#endif 
+        call calc_radiance_dn(ng, nlev, &
              &  weight, &
              &  transmittance, source_dn, v_overlap, flux_dn)
-        call calc_radiance_up(nspec, nlev, &
+        call calc_radiance_up(ng, nlev, &
              &  weight, flux_up_base(:,:,nlev), &
              &  transmittance, source_up, u_overlap, flux_up)
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_radiance_dn_up')
+#endif 
       end if
 
     end do
@@ -401,7 +479,7 @@ end subroutine calc_flux
 !---------------------------------------------------------------------
 ! Compute the flux profile neglecting the effects of scattering, via
 ! a number of radiance calculations
-subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, planck_hl, &
+subroutine calc_no_scattering_flux(ng_lw_in, nlev, surf_emission, surf_albedo, planck_hl, &
      &  cloud_fraction, &
 #if NUM_REGIONS == 3
      &  fractional_std, &
@@ -422,17 +500,17 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
 
   ! Number of spectral intervals and levels. Note that all
   ! level-dependent variables count down from top-of-atmosphere.
-  integer(jpim), intent(in) :: nspec, nlev
+  integer(jpim), intent(in) :: ng_lw_in, nlev
 
   ! Surface upwards emission, in W m-2 (i.e. emissivity multiplied
   ! by Planck function at the surface skin temperature) integrated
   ! across each spectral interval, and albedo in the same intervals
-  real(jprb), intent(in), dimension(nspec) :: surf_emission, surf_albedo
+  real(jprb), intent(in), dimension(ng) :: surf_emission, surf_albedo
 
   ! Planck function integrated over each spectral interval at each
   ! half-level, in W m-2 (i.e. the flux emitted by a horizontal
   ! black-body surface)
-  real(jprb), intent(in), dimension(nspec,nlev+1) :: planck_hl
+  real(jprb), intent(in), dimension(ng,nlev+1) :: planck_hl
 
   ! Profile of cloud fraction 
   real(jprb), intent(in), dimension(nlev) :: cloud_fraction
@@ -445,12 +523,12 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
 #endif
 
   ! Layer optical depth of gas and aerosol
-  real(jprb), intent(in), dimension(nspec,nlev) :: od_clear
+  real(jprb), intent(in), dimension(ng,nlev) :: od_clear
 
   ! Layer optical depth of cloud averaged only over the cloudy part
   ! of the gridbox. If Chou scaling is required then this should
   ! have been done already.
-  real(jprb), intent(in), dimension(nspec,nlev) :: od_cloud
+  real(jprb), intent(in), dimension(ng,nlev) :: od_cloud
 
   ! Overlap parameter governing how clouds in adjacent layers are
   ! overlapped - this is the "alpha" of Hogan and Illingworth
@@ -462,7 +540,7 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
 
   ! Upwelling and downwelling fluxes in each spectral interval at
   ! each half-level (W m-2)
-  real(jprb), intent(out), dimension(nspec,nlev+1) :: flux_up, flux_dn
+  real(jprb), intent(out), dimension(ng,nlev+1) :: flux_up, flux_dn
 
   ! Optional inputs
 
@@ -483,14 +561,14 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
   ! Local variables
 
   ! Combined gas/aerosol/cloud optical depth in each region
-  real(jprb), dimension(nspec,NREGION,nlev)   :: od
+  real(jprb), dimension(ng,NREGION,nlev)   :: od
 
   ! Transmittance of each layer and region
-  real(jprb), dimension(nspec,NREGION,nlev) :: transmittance
+  real(jprb), dimension(ng,NREGION,nlev) :: transmittance
 
   ! Rate of emission up from the top or down through the base of
   ! each layer and region (W m-2)
-  real(jprb), dimension(nspec,NREGION,nlev) :: source_up, source_dn
+  real(jprb), dimension(ng,NREGION,nlev) :: source_up, source_dn
 
   ! Which layers are cloud-free?  Dummy cloud-free layers are added
   ! above TOA (level 0) and below the ground (level nlev+1).
@@ -501,7 +579,7 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
   real(jprb), dimension(NREGION,NREGION,nlev+1) :: u_overlap, v_overlap
 
   ! Surface upwelling flux (W m-2)
-  real(jprb), dimension(nspec,NREGION) :: flux_up_surf
+  real(jprb), dimension(ng,NREGION) :: flux_up_surf
 
   ! Cloud optical depth scaling in each cloudy region
   real(jprb) :: od_scaling(2:NREGION,nlev)
@@ -566,7 +644,7 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
   ! Average gas and cloud properties
   od(:,1,:) = od_clear
   do jreg = 2,NREGION
-    od(:,jreg,:) = od_clear + od_cloud*spread(od_scaling(jreg,:),1,nspec)
+    od(:,jreg,:) = od_clear + od_cloud*spread(od_scaling(jreg,:),1,ng)
   end do
 
   ! Identify cloud-free layers
@@ -591,40 +669,40 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
   flux_dn = 0.0_jprb
 
   ! Emission-only contribution in the first instance
-  flux_up_surf = spread(surf_emission,2,NREGION)*spread(region_fracs(:,nlev),1,nspec)
+  flux_up_surf = spread(surf_emission,2,NREGION)*spread(region_fracs(:,nlev),1,ng)
   
   if (n_angles_per_hem_local <= 1) then
     jstream = 1
-    call calc_no_scattering_radiance_source(nspec, nlev, NREGION, &
+    call calc_no_scattering_radiance_source(ng, nlev, NREGION, &
          &  mu_list(jstream), &
          &  region_fracs, planck_hl, od,  &
          &  transmittance, source_up=source_up, source_dn=source_dn)
     ! Radiances are computed in pairs: up and down with same
     ! absolute zenith angle
-    call calc_radiance_dn(nspec, nlev, &
+    call calc_radiance_dn(ng, nlev, &
          &  weight_list(jstream), &
          &  transmittance, source_dn, v_overlap, flux_dn)
     ! Add surface reflection to the upwelling flux assuming horizontal
     ! homogenization if multiple regions present in lowest layer
     flux_up_surf = flux_up_surf + spread(surf_albedo*flux_dn(:,nlev+1),2,NREGION) &
-         &                      * spread(region_fracs(:,nlev),1,nspec)
-    call calc_radiance_up(nspec, nlev, &
+         &                      * spread(region_fracs(:,nlev),1,ng)
+    call calc_radiance_up(ng, nlev, &
          &  weight_list(jstream), flux_up_surf, &
          &  transmittance, source_up, u_overlap, flux_up)
   else
     ! First estimate longwave downward flux at the surface from a
     ! single downward beam
-    call calc_no_scattering_radiance_source(nspec, nlev, NREGION, &
+    call calc_no_scattering_radiance_source(ng, nlev, NREGION, &
          &  1.0_jprb / lw_diffusivity, &
          &  region_fracs, planck_hl, od,  &
          &  transmittance, source_dn=source_dn)
-    call calc_radiance_dn(nspec, nlev, &
+    call calc_radiance_dn(ng, nlev, &
          &  1.0_jprb, &
          &  transmittance, source_dn, v_overlap, flux_dn)
     ! Add surface reflection to the upwelling flux assuming horizontal
     ! homogenization if multiple regions present in lowest layer
     flux_up_surf = flux_up_surf + spread(surf_albedo*flux_dn(:,nlev+1),2,NREGION) &
-         &                      * spread(region_fracs(:,nlev),1,nspec)
+         &                      * spread(region_fracs(:,nlev),1,ng)
     ! Re-zero the downward flux
     flux_dn = 0.0_jprb
     ! Main loop over angles, with radiances are computed in pairs: up
@@ -633,14 +711,14 @@ subroutine calc_no_scattering_flux(nspec, nlev, surf_emission, surf_albedo, plan
       weight = weight_list(jstream)*mu_list(jstream) &
            &  / sum(weight_list(1:n_angles_per_hem_local) &
            &          * mu_list(1:n_angles_per_hem_local))
-      call calc_no_scattering_radiance_source(nspec, nlev, NREGION, &
+      call calc_no_scattering_radiance_source(ng, nlev, NREGION, &
            &  mu_list(jstream), &
            &  region_fracs, planck_hl, od,  &
            &  transmittance, source_up=source_up, source_dn=source_dn)
-      call calc_radiance_dn(nspec, nlev, &
+      call calc_radiance_dn(ng, nlev, &
            &  weight, &
            &  transmittance, source_dn, v_overlap, flux_dn)
-      call calc_radiance_up(nspec, nlev, &
+      call calc_radiance_up(ng, nlev, &
            &  weight, flux_up_surf, &
            &  transmittance, source_up, u_overlap, flux_up)
     end do

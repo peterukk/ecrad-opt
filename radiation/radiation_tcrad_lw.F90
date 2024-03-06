@@ -39,8 +39,19 @@ contains
     use tcrad_3region_solver, only     : calc_flux_3region => calc_flux, &
          &                               calc_no_scattering_flux_3region => calc_no_scattering_flux
     use radiation_constants,  only : GasConstantDryAir, AccelDueToGravity
-
+#ifdef USE_TIMING
+    ! Timing library
+    use gptl,                  only: gptlstart, gptlstop
+#endif
     implicit none
+
+! ! Allow size of inner dimension (number of g-points) to be known at compile time if NG_LW is defined
+! #ifdef NG_LW
+!   integer, parameter :: ng = NG_LW
+! #else
+! #define ng ng_lw_in
+! #endif
+
 
     real(jprb), parameter :: R_over_g = GasConstantDryAir / AccelDueToGravity
 
@@ -98,12 +109,15 @@ contains
     ! Spectral fluxes
     real(jprb), dimension(config%n_g_lw,nlev+1) :: flux_up, flux_dn
 
-    ! Column loop index
-    integer :: jcol
-
+    ! Loop index
+    integer :: jcol, jlev, jg
+    integer :: sums_up, sums_dn
     logical :: do_shadowing
 
     real(jphook) :: hook_handle
+#ifdef USE_TIMING
+    integer :: ret
+#endif
 
     if (lhook) call dr_hook('radiation_tcrad_lw:solver_tcrad_lw',0,hook_handle)
 
@@ -124,15 +138,34 @@ contains
     end if
 
     do jcol = istartcol,iendcol
-
       if (config%do_clear) then
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_clear_flux')
+#endif
         call calc_clear_sky_flux(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
              &  planck_hl(:,:,jcol), od(:,:,jcol), flux_up, flux_dn, &
              &  n_angles_per_hem=config%n_angles_per_hemisphere_lw)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_clear_flux')
+#endif
+#ifdef USE_TIMING
+    ret =  gptlstart('clear_flux_sum')
+#endif
+        ! do jlev = 1, nlev+1
+        !   sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+        !   !$omp simd reduction(+:sums_up, sums_dn)
+        !   do jg = 1, config%n_g_lw  
+        !     sums_up = sums_up + flux_up(jg,jlev) 
+        !     sums_dn = sums_dn + flux_dn(jg,jlev)
+        !   end do
+        !   flux%lw_up_clear(jcol,jlev) = sums_up
+        !   flux%lw_dn_clear(jcol,jlev) = sums_dn
+        ! end do 
         flux%lw_up_clear(jcol,:) = sum(flux_up,1)
         flux%lw_dn_clear(jcol,:) = sum(flux_dn,1)
-
+#ifdef USE_TIMING
+    ret =  gptlstop('clear_flux_sum')
+#endif
         if (config%do_save_spectral_flux) then
           call indexed_sum_profile(flux_up, &
                &           config%i_spec_from_reordered_g_lw, &
@@ -157,9 +190,13 @@ contains
           inv_cloud_separation_scale_up = cloud%inv_cloud_effective_size_up_lw(jcol,:) &
                &  * sqrt(cloud%fraction(jcol,:)*(1.0_jprb-cloud%fraction(jcol,:)))
         else
-          inv_cloud_separation_scale = cloud%inv_cloud_effective_size(jcol,:) &
-               &  * sqrt(cloud%fraction(jcol,:)*(1.0_jprb-cloud%fraction(jcol,:)))
+          ! inv_cloud_separation_scale = cloud%inv_cloud_effective_size(jcol,:) &
+          !      &  * sqrt(cloud%fraction(jcol,:)*(1.0_jprb-cloud%fraction(jcol,:)))
+          inv_cloud_separation_scale = &
+              & min(cloud%inv_cloud_effective_size(jcol,:),1.0_jprb / config%min_cloud_effective_size) &
+              &  * sqrt(cloud%fraction(jcol,:)*(1.0_jprb-cloud%fraction(jcol,:)))   
         end if
+
       end if
 
       od_cloud_regrid    = od_cloud(config%i_band_from_reordered_g_lw,:,jcol)
@@ -167,6 +204,9 @@ contains
         ssa_cloud_regrid = ssa_cloud(config%i_band_from_reordered_g_lw,:,jcol)
         g_cloud_regrid   = g_cloud(config%i_band_from_reordered_g_lw,:,jcol)
         if (config%nregions == 2) then
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_flux_2region')
+#endif  
           if (config%do_3d_effects) then
             ! Two regions with scattering and 3D effects
             if (do_shadowing) then
@@ -178,7 +218,8 @@ contains
                    &         n_angles_per_hem=config%n_angles_per_hemisphere_lw, &
                    &         layer_thickness=layer_thickness, inv_cloud_scale_up=inv_cloud_separation_scale_up, &
                    &         inv_cloud_scale_dn=inv_cloud_separation_scale, &
-                   &         cloud_cover=flux%cloud_cover_lw(jcol))
+                   &         cloud_cover=flux%cloud_cover_lw(jcol), &
+                   &         max_cloud_od_lw= config%max_cloud_od_lw)
             else
               call calc_flux_2region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), &
@@ -187,7 +228,8 @@ contains
                    &         flux_up, flux_dn, &
                    &         n_angles_per_hem=config%n_angles_per_hemisphere_lw, &
                    &         layer_thickness=layer_thickness, inv_cloud_scale=inv_cloud_separation_scale, &
-                   &         cloud_cover=flux%cloud_cover_lw(jcol))
+                   &         cloud_cover=flux%cloud_cover_lw(jcol), &
+                   &         max_cloud_od_lw= config%max_cloud_od_lw)
             end if
           else
             ! Two regions with scattering but without 3D effects
@@ -199,7 +241,13 @@ contains
                  &         n_angles_per_hem=config%n_angles_per_hemisphere_lw, &
                  &         cloud_cover=flux%cloud_cover_lw(jcol))
           end if
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_flux_2region')
+#endif  
         else
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_flux_3region')
+#endif  
           if (config%do_3d_effects) then
             ! Three regions with scattering and 3D effects
             if (do_shadowing) then
@@ -211,7 +259,8 @@ contains
                    &         n_angles_per_hem=config%n_angles_per_hemisphere_lw, &
                    &         layer_thickness=layer_thickness, inv_cloud_scale_up=inv_cloud_separation_scale_up, &
                    &         inv_cloud_scale_dn=inv_cloud_separation_scale, &
-                   &         cloud_cover=flux%cloud_cover_lw(jcol))
+                   &         cloud_cover=flux%cloud_cover_lw(jcol), &
+                   &         max_cloud_od_lw= config%max_cloud_od_lw)
             else
               call calc_flux_3region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), cloud%fractional_std(jcol,:), &
@@ -220,7 +269,8 @@ contains
                    &         flux_up, flux_dn, &
                    &         n_angles_per_hem=config%n_angles_per_hemisphere_lw, &
                    &         layer_thickness=layer_thickness, inv_cloud_scale=inv_cloud_separation_scale, &
-                   &         cloud_cover=flux%cloud_cover_lw(jcol))
+                   &         cloud_cover=flux%cloud_cover_lw(jcol), &
+                   &         max_cloud_od_lw= config%max_cloud_od_lw)
             end if
           else
             ! Three regions with scattering but without 3D effects
@@ -233,7 +283,13 @@ contains
                  &         cloud_cover=flux%cloud_cover_lw(jcol))
           end if
         end if
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_flux_3region')
+#endif 
       else
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_flux_noscat')
+#endif 
         ! Assume that the optical depth of clouds is the absorption
         ! optical depth
         if (config%nregions == 2) then
@@ -258,11 +314,28 @@ contains
                &         do_3d_effects=config%do_3d_effects, &
                &         cloud_cover=flux%cloud_cover_lw(jcol))
         end if
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_flux_noscat')
+#endif 
       end if
-
+#ifdef USE_TIMING
+    ret =  gptlstart('final_flux_sum')
+#endif
       flux%lw_up(jcol,:) = sum(flux_up,1)
       flux%lw_dn(jcol,:) = sum(flux_dn,1)
-
+      ! do jlev = 1, nlev+1
+      !   sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+      !   !$omp simd reduction(+:sums_up, sums_dn)
+      !   do jg = 1, config%n_g_lw  
+      !     sums_up = sums_up + flux_up(jg,jlev) 
+      !     sums_dn = sums_dn + flux_dn(jg,jlev)
+      !   end do
+      !   flux%lw_up(jcol,jlev) = sums_up
+      !   flux%lw_dn(jcol,jlev) = sums_dn
+      ! end do 
+#ifdef USE_TIMING
+    ret =  gptlstop('final_flux_sum')
+#endif
       if (config%do_save_spectral_flux) then
         call indexed_sum_profile(flux_up, &
              &           config%i_spec_from_reordered_g_lw, &

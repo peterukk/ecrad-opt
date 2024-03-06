@@ -249,6 +249,7 @@ subroutine calc_region_edge_areas(nlev, region_fracs, layer_thickness, &
   ! region_fracs(3,:))
   region_edge_area(2,:) = 4.0_jprb * layer_thickness * inv_cloud_scale &
        &  * sqrt(region_fracs(3,:)*(1.0_jprb-region_fracs(3,:)))
+  ! print *, "min max edge AREA LW", minval(region_edge_area), maxval(region_edge_area)
 
 #endif
 

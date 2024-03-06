@@ -12,8 +12,13 @@ OPTFLAGS = -O2 -march=core-avx2 -fpe0 -no-fma -assume byterecl -align array64byt
 
 #OPTFLAGS = --ipo -O3 -no-prec-div -static -fp-model fast=2 -march=core-avx2 #-heap-arrays
 #OPTFLAGS = -O3 -xHost #-march=core-avx2
+DEBUGFLAGS = -g
+
 else
+
 OPTFLAGS = -O0
+DEBUGFLAGS = -g -traceback
+
 endif
 
 #BLAS LIBRARY
@@ -26,7 +31,6 @@ FCLIBS=-lunwind
 LDFLAGS = -lrt
 WARNFLAGS = -warn all
 BASICFLAGS = -module ../mod -convert big_endian -fpe0 -fp-model precise -ftz -fp-speculation safe
-DEBUGFLAGS = -g
 
 #OMPFLAG = -qopenmp -qopenmp-lib=compat
 OMPFLAG = -qopenmp 

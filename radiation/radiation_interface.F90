@@ -532,10 +532,16 @@ contains
                &  g_lw_cloud, planck_hl, lw_emission, lw_albedo, flux)
         elseif (config%i_solver_lw == ISolverTcrad) then
           ! Compute fluxes using the TCRAD longwave solver
+#ifdef USE_TIMING
+    ret =  gptlstart('tcrad_lw')
+#endif  
           call solver_tcrad_lw(nlev,istartcol,iendcol, &
                &  config, thermodynamics, cloud, & 
                &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
                &  planck_hl, lw_emission, lw_albedo, flux)
+#ifdef USE_TIMING
+    ret =  gptlstop('tcrad_lw')
+#endif  
         else
           ! Compute fluxes using the cloudless solver
           call solver_cloudless_lw(nlev,istartcol,iendcol, &

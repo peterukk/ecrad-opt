@@ -26,6 +26,16 @@ module tcrad_3region_solver
 #define NUM_REGIONS 3
   integer(jpim), parameter :: NREGION = NUM_REGIONS
 
+! Allow size of inner dimension (number of g-points) to be known at compile time if NG_LW is defined
+#ifdef NG_LW
+  integer, parameter, private :: ng = NG_LW
+#else
+#define ng ng_lw_in
+#endif
+
+!#define USE_SPART_DP 
+
+
 contains
 
 ! The following header files define routines and functions that make

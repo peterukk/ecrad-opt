@@ -9,3 +9,5 @@ slurm*
 mod/
 test/ifs-bigrand/timings
 *tmp*.nc
+*.png
+out_*
