@@ -19,7 +19,7 @@ module radiation_tcrad_lw
 
 contains
 
-  subroutine solver_tcrad_lw(nlev,istartcol,iendcol, &
+  subroutine solver_tcrad_lw(ng_lw_in,nlev,istartcol,iendcol, &
        &  config, thermodynamics, cloud, & 
        &  od, ssa, g, od_cloud, ssa_cloud, g_cloud, planck_hl, &
        &  emission, albedo, &
@@ -45,17 +45,17 @@ contains
 #endif
     implicit none
 
-! ! Allow size of inner dimension (number of g-points) to be known at compile time if NG_LW is defined
-! #ifdef NG_LW
-!   integer, parameter :: ng = NG_LW
-! #else
-! #define ng ng_lw_in
-! #endif
-
+! Allow size of inner dimension (number of g-points) to be known at compile time if NG_LW is defined
+#ifdef NG_LW
+  integer, parameter :: ng_lw = NG_LW
+#else
+#define ng_lw ng_lw_in
+#endif
 
     real(jprb), parameter :: R_over_g = GasConstantDryAir / AccelDueToGravity
 
     ! Inputs
+    integer, intent(in) :: ng_lw_in           ! number of g-points
     integer, intent(in) :: nlev               ! number of model levels
     integer, intent(in) :: istartcol, iendcol ! range of columns to process
     type(config_type),        intent(in) :: config
@@ -64,7 +64,7 @@ contains
 
     ! Gas and aerosol optical depth of each layer at each longwave
     ! g-point
-    real(jprb), intent(in), dimension(config%n_g_lw,nlev,istartcol:iendcol) :: od
+    real(jprb), intent(in), dimension(ng_lw,nlev,istartcol:iendcol) :: od
 
     ! Gas and aerosol single-scattering albedo and asymmetry factor,
     ! only if longwave scattering by aerosols is to be represented
@@ -83,11 +83,11 @@ contains
 
     ! Planck function (emitted flux from a black body) at half levels
     ! and at the surface at each longwave g-point
-    real(jprb), intent(in), dimension(config%n_g_lw,nlev+1,istartcol:iendcol) :: planck_hl
+    real(jprb), intent(in), dimension(ng_lw,nlev+1,istartcol:iendcol) :: planck_hl
 
     ! Emission (Planck*emissivity) and albedo (1-emissivity) at the
     ! surface at each longwave g-point
-    real(jprb), intent(in), dimension(config%n_g_lw, istartcol:iendcol) :: emission, albedo
+    real(jprb), intent(in), dimension(ng_lw, istartcol:iendcol) :: emission, albedo
 
     ! Output
     type(flux_type), intent(inout):: flux
@@ -95,7 +95,7 @@ contains
     ! Local variables
 
     ! Regridded cloud properties
-    real(jprb), dimension(config%n_g_lw,nlev) :: od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid
+    real(jprb), dimension(ng_lw,nlev) :: od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid
 
     ! Additional geometric properties needed for 3D effects: inverse
     ! of the cloud separation scale (Fielding et al. 20202) (m-1), and
@@ -107,11 +107,11 @@ contains
     real(jprb), dimension(nlev) :: inv_cloud_separation_scale_up
 
     ! Spectral fluxes
-    real(jprb), dimension(config%n_g_lw,nlev+1) :: flux_up, flux_dn
+    real(jprb), dimension(ng_lw,nlev+1) :: flux_up, flux_dn
 
     ! Loop index
     integer :: jcol, jlev, jg
-    integer :: sums_up, sums_dn
+    real(jprb) :: sums_up, sums_dn
     logical :: do_shadowing
 
     real(jphook) :: hook_handle
@@ -142,30 +142,25 @@ contains
 #ifdef USE_TIMING
     ret =  gptlstart('calc_clear_flux')
 #endif
-        call calc_clear_sky_flux(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+        call calc_clear_sky_flux(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
              &  planck_hl(:,:,jcol), od(:,:,jcol), flux_up, flux_dn, &
              &  n_angles_per_hem=config%n_angles_per_hemisphere_lw)
 #ifdef USE_TIMING
     ret =  gptlstop('calc_clear_flux')
 #endif
-#ifdef USE_TIMING
-    ret =  gptlstart('clear_flux_sum')
-#endif
-        ! do jlev = 1, nlev+1
-        !   sums_up = 0.0_jprb; sums_dn = 0.0_jprb
-        !   !$omp simd reduction(+:sums_up, sums_dn)
-        !   do jg = 1, config%n_g_lw  
-        !     sums_up = sums_up + flux_up(jg,jlev) 
-        !     sums_dn = sums_dn + flux_dn(jg,jlev)
-        !   end do
-        !   flux%lw_up_clear(jcol,jlev) = sums_up
-        !   flux%lw_dn_clear(jcol,jlev) = sums_dn
-        ! end do 
-        flux%lw_up_clear(jcol,:) = sum(flux_up,1)
-        flux%lw_dn_clear(jcol,:) = sum(flux_dn,1)
-#ifdef USE_TIMING
-    ret =  gptlstop('clear_flux_sum')
-#endif
+        do jlev = 1, nlev+1
+          sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+          !$omp simd reduction(+:sums_up, sums_dn)
+          do jg = 1, ng_lw  
+            sums_up = sums_up + flux_up(jg,jlev) 
+            sums_dn = sums_dn + flux_dn(jg,jlev)
+          end do
+          flux%lw_up_clear(jcol,jlev) = sums_up
+          flux%lw_dn_clear(jcol,jlev) = sums_dn
+        end do 
+        ! flux%lw_up_clear(jcol,:) = sum(flux_up,1)
+        ! flux%lw_dn_clear(jcol,:) = sum(flux_dn,1)
+
         if (config%do_save_spectral_flux) then
           call indexed_sum_profile(flux_up, &
                &           config%i_spec_from_reordered_g_lw, &
@@ -210,7 +205,7 @@ contains
           if (config%do_3d_effects) then
             ! Two regions with scattering and 3D effects
             if (do_shadowing) then
-              call calc_flux_2region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+              call calc_flux_2region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), &
                    &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                    &         cloud%overlap_param(jcol,:), &
@@ -221,7 +216,7 @@ contains
                    &         cloud_cover=flux%cloud_cover_lw(jcol), &
                    &         max_cloud_od_lw= config%max_cloud_od_lw)
             else
-              call calc_flux_2region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+              call calc_flux_2region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), &
                    &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                    &         cloud%overlap_param(jcol,:), &
@@ -233,7 +228,7 @@ contains
             end if
           else
             ! Two regions with scattering but without 3D effects
-            call calc_flux_2region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+            call calc_flux_2region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                  &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), &
                  &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                  &         cloud%overlap_param(jcol,:), &
@@ -251,7 +246,7 @@ contains
           if (config%do_3d_effects) then
             ! Three regions with scattering and 3D effects
             if (do_shadowing) then
-              call calc_flux_3region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+              call calc_flux_3region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), cloud%fractional_std(jcol,:), &
                    &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                    &         cloud%overlap_param(jcol,:), &
@@ -262,7 +257,7 @@ contains
                    &         cloud_cover=flux%cloud_cover_lw(jcol), &
                    &         max_cloud_od_lw= config%max_cloud_od_lw)
             else
-              call calc_flux_3region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+              call calc_flux_3region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                    &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), cloud%fractional_std(jcol,:), &
                    &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                    &         cloud%overlap_param(jcol,:), &
@@ -274,7 +269,7 @@ contains
             end if
           else
             ! Three regions with scattering but without 3D effects
-            call calc_flux_3region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+            call calc_flux_3region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                  &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), cloud%fractional_std(jcol,:), &
                  &         od(:,:,jcol), od_cloud_regrid, ssa_cloud_regrid, g_cloud_regrid, &
                  &         cloud%overlap_param(jcol,:), &
@@ -294,7 +289,7 @@ contains
         ! optical depth
         if (config%nregions == 2) then
           ! Two regions and no scattering or 3D effects
-          call calc_no_scattering_flux_2region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+          call calc_no_scattering_flux_2region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                &         planck_hl(:,:,jcol), cloud%fraction(jcol,:), &
                &         od(:,:,jcol), od_cloud_regrid, &
                &         cloud%overlap_param(jcol,:), &
@@ -304,7 +299,7 @@ contains
                &         cloud_cover=flux%cloud_cover_lw(jcol))
         else
           ! Thre regions and no scattering or 3D effects
-          call calc_no_scattering_flux_3region(config%n_g_lw, nlev, emission(:,jcol), albedo(:,jcol), &
+          call calc_no_scattering_flux_3region(ng_lw, nlev, emission(:,jcol), albedo(:,jcol), &
                &         planck_hl(:,:,jcol), &
                &         cloud%fraction(jcol,:), cloud%fractional_std(jcol,:), &
                &         od(:,:,jcol), od_cloud_regrid, &
@@ -318,24 +313,20 @@ contains
     ret =  gptlstop('calc_flux_noscat')
 #endif 
       end if
-#ifdef USE_TIMING
-    ret =  gptlstart('final_flux_sum')
-#endif
-      flux%lw_up(jcol,:) = sum(flux_up,1)
-      flux%lw_dn(jcol,:) = sum(flux_dn,1)
-      ! do jlev = 1, nlev+1
-      !   sums_up = 0.0_jprb; sums_dn = 0.0_jprb
-      !   !$omp simd reduction(+:sums_up, sums_dn)
-      !   do jg = 1, config%n_g_lw  
-      !     sums_up = sums_up + flux_up(jg,jlev) 
-      !     sums_dn = sums_dn + flux_dn(jg,jlev)
-      !   end do
-      !   flux%lw_up(jcol,jlev) = sums_up
-      !   flux%lw_dn(jcol,jlev) = sums_dn
-      ! end do 
-#ifdef USE_TIMING
-    ret =  gptlstop('final_flux_sum')
-#endif
+
+      ! flux%lw_up(jcol,:) = sum(flux_up,1)
+      ! flux%lw_dn(jcol,:) = sum(flux_dn,1)
+      do jlev = 1, nlev+1
+        sums_up = 0.0_jprb; sums_dn = 0.0_jprb
+        !$omp simd reduction(+:sums_up, sums_dn)
+        do jg = 1, ng_lw
+          sums_up = sums_up + flux_up(jg,jlev) 
+          sums_dn = sums_dn + flux_dn(jg,jlev)
+        end do
+        flux%lw_up(jcol,jlev) = sums_up
+        flux%lw_dn(jcol,jlev) = sums_dn
+      end do 
+
       if (config%do_save_spectral_flux) then
         call indexed_sum_profile(flux_up, &
              &           config%i_spec_from_reordered_g_lw, &

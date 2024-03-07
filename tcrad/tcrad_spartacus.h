@@ -107,7 +107,7 @@ subroutine calc_radiance_trans_source_3d(ng_lw_in, nlev, &
 
   ! Working variable
   real(jprm), dimension(ng,NREGION) :: d0, d_prime, source_diff, source_far
-  real(jprm) :: coeff
+  real(jprm) :: coeff, coeff2, mu_over_od
 
   ! Secant and tangent of zenith angle
   real(jprm) :: secant_za, tan_za
@@ -255,32 +255,38 @@ subroutine calc_radiance_trans_source_3d(ng_lw_in, nlev, &
       if (present(source_dn)) then
         do jg = 1,ng
           coeff = (rate_dn_top(jg,1,jlev) - rate_dn_base(jg,1,jlev)) &
-               &   * mu / od(jg,1,jlev)
+              &   * mu / od(jg,1,jlev)
           source_dn(jg,1,jlev) = coeff + rate_dn_base(jg,1,jlev) &
-               - transmittance(jg,1,1,jlev) * (coeff + rate_dn_top(jg,1,jlev))
+              - transmittance(jg,1,1,jlev) * (coeff + rate_dn_top(jg,1,jlev))
         end do
         source_dn(:,2:NREGION,jlev) = 0.0_jprm
       end if
       if (present(source_up)) then
         do jg = 1,ng
           coeff = (rate_up_base(jg,1,jlev) - rate_up_top(jg,1,jlev)) &
-               &   * mu / od(jg,1,jlev)
+              &   * mu / od(jg,1,jlev)
           source_up(jg,1,jlev) = coeff + rate_up_top(jg,1,jlev) &
-               - transmittance(jg,1,1,jlev) * (coeff + rate_up_base(jg,1,jlev))
+              - transmittance(jg,1,1,jlev) * (coeff + rate_up_base(jg,1,jlev))
         end do
         source_up(:,2:NREGION,jlev) = 0.0_jprm
       end if
-      ! Securities in case of low optical depth needed when using single precision
-      ! from radiation_two_stream
+      ! Securities in case of low optical depth needed at least when using single precision
       do jg = 1,ng
         if (od(jg,1,jlev) < OdThresholdLw) then
           if (od(jg,1,jlev) < 1.0e-8_jprm) then 
             if (present(source_up)) source_up(jg,1,jlev) = 0._jprm
             if (present(source_dn)) source_dn(jg,1,jlev) = 0._jprm
           else 
-            source_up(jg,1,jlev) = (One - transmittance(jg,1,1,jlev)) &
-            &       * Half * (rate_up_top(jg,1,jlev) + rate_up_base(jg,1,jlev))
-            source_dn(jg,1,jlev) = source_up(jg,1,jlev)
+            if(present(source_up) .and. present(source_dn)) then 
+              source_up(jg,1,jlev) = (One - transmittance(jg,1,1,jlev)) &
+                  &     * Half * (rate_up_top(jg,1,jlev) + rate_up_base(jg,1,jlev))
+              source_dn(jg,1,jlev) = source_up(jg,1,jlev)
+            else 
+              if (present(source_up)) source_up(jg,1,jlev) = (One - transmittance(jg,1,1,jlev)) &
+                  &       * Half * (rate_up_top(jg,1,jlev) + rate_up_base(jg,1,jlev))
+              if (present(source_dn)) source_dn(jg,1,jlev) = (One - transmittance(jg,1,1,jlev)) &
+                  &       * Half * (rate_up_top(jg,1,jlev) + rate_up_base(jg,1,jlev))
+            end if 
           end if 
         end if
       end do 

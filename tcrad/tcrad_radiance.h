@@ -217,8 +217,8 @@ subroutine calc_radiance_up_3d(ng_lw_in, nlev, &
   ! Radiance per region at base and top of each layer
   real(jprb), dimension(ng,NREGION) :: radiance_base, radiance_top
 
-  ! Loop index for level
-  integer(jpim) :: jlev
+  ! Loop index
+  integer(jpim) :: jlev, j
 
   real(jphook) :: hook_handle
 
@@ -232,13 +232,33 @@ subroutine calc_radiance_up_3d(ng_lw_in, nlev, &
   radiance_up(:,nlev+1) = radiance_up(:,nlev+1) + sum(radiance_base,2)
 
   do jlev = nlev,1,-1
-    ! Transmittance including exchange between regions
-    radiance_top = mat_x_vec(ng,transmittance(:,:,:,jlev),radiance_base) &
-         &       + weight * source_up(:,:,jlev)
-    ! Overlap rules to obtain radiances at base of the layer above
-    radiance_base = singlemat_x_vec(ng,u_overlap(:,:,jlev),radiance_top)
-    ! Save radiances
-    radiance_up(:,jlev) = radiance_up(:,jlev) + sum(radiance_base,2)
+    if (NREGION==3) then 
+      associate(A=>transmittance(:,:,:,jlev), rt=>radiance_top, rb=>radiance_base, C=>u_overlap(:,:,jlev))
+        do j = 1, ng
+          ! Transmittance including exchange between regions
+          ! both inner and outer loop of the matrix loops j1 and j2 unrolled
+          rt(j,1) = A(j,1,1)*rb(j,1) + A(j,1,2)*rb(j,2) + A(j,1,3)*rb(j,3) + weight * source_up(j,1,jlev)
+          rt(j,2) = A(j,2,1)*rb(j,1) + A(j,2,2)*rb(j,2) + A(j,2,3)*rb(j,3) + weight * source_up(j,2,jlev)
+          rt(j,3) = A(j,3,1)*rb(j,1) + A(j,3,2)*rb(j,2) + A(j,3,3)*rb(j,3) + weight * source_up(j,3,jlev)
+           
+          ! Overlap rules to obtain radiances at base of the layer above
+          rb(j,1) = C(1,1)*rt(j,1) + C(1,2)*rt(j,2) + C(1,3)*rt(j,3) ! j1=1
+          rb(j,2) = C(2,1)*rt(j,1) + C(2,2)*rt(j,2) + C(2,3)*rt(j,3) ! j1=2
+          rb(j,3) = C(3,1)*rt(j,1) + C(3,2)*rt(j,2) + C(3,3)*rt(j,3) ! j1=3
+
+          ! Save radiances 
+          radiance_up(j,jlev) = radiance_up(j,jlev) + rb(j,1) + rb(j,2) + rb(j,3)
+        end do
+      end associate
+    else 
+      ! Transmittance including exchange between regions
+      radiance_top = mat_x_vec(ng,transmittance(:,:,:,jlev),radiance_base) &
+          &       + weight * source_up(:,:,jlev)
+      ! Overlap rules to obtain radiances at base of the layer above
+      radiance_base = singlemat_x_vec(ng,u_overlap(:,:,jlev),radiance_top)
+      ! Save radiances
+      radiance_up(:,jlev) = radiance_up(:,jlev) + sum(radiance_base,2)
+    end if 
   end do
 
   if (lhook) call dr_hook('tcrad:calc_radiance_up_3d',1,hook_handle)
@@ -288,8 +308,8 @@ subroutine calc_radiance_dn_3d(ng_lw_in, nlev, &
   ! Radiance per region at base and top of each layer
   real(jprb), dimension(ng,NREGION) :: radiance_base, radiance_top
 
-  ! Loop index for level
-  integer(jpim) :: jlev
+  ! Loop index
+  integer(jpim) :: jlev, j
 
   real(jphook) :: hook_handle
 
@@ -299,13 +319,36 @@ subroutine calc_radiance_dn_3d(ng_lw_in, nlev, &
   radiance_top = 0.0_jprb
 
   do jlev = 1,nlev
-    ! Solution to Schwarzschild equation
-    radiance_base = mat_x_vec(ng,transmittance(:,:,:,jlev),radiance_top) &
-         &        + weight * source_dn(:,:,jlev)
-    ! Overlap rules to obtain radiances at base of the layer above
-    radiance_top = singlemat_x_vec(ng,v_overlap(:,:,jlev+1),radiance_base)
-    ! Save radiances
-    radiance_dn(:,jlev+1) = radiance_dn(:,jlev+1) + sum(radiance_top,2)
+    if (NREGION==3) then 
+      associate(A=>transmittance(:,:,:,jlev), rt=>radiance_top, rb=>radiance_base, C=>v_overlap(:,:,jlev+1))
+        do j = 1, ng 
+          ! Solution to Schwarzschild equation
+          ! both inner and outer loop of the matrix loops j1 and j2 unrolled
+          ! inner loop:   j2=1               j2=2                  j2=3 
+          rb(j,1) = A(j,1,1)*rt(j,1) + A(j,1,2)*rt(j,2) + A(j,1,3)*rt(j,3) + weight * source_dn(j,1,jlev)
+          rb(j,2) = A(j,2,1)*rt(j,1) + A(j,2,2)*rt(j,2) + A(j,2,3)*rt(j,3) + weight * source_dn(j,2,jlev)
+          rb(j,3) = A(j,3,1)*rt(j,1) + A(j,3,2)*rt(j,2) + A(j,3,3)*rt(j,3) + weight * source_dn(j,3,jlev)
+           
+          ! Overlap rules to obtain radiances at base of the layer above
+          rt(j,1) = C(1,1)*rb(j,1) + C(1,2)*rb(j,2) + C(1,3)*rb(j,3) ! j1=1
+          rt(j,2) = C(2,1)*rb(j,1) + C(2,2)*rb(j,2) + C(2,3)*rb(j,3) ! j1=2
+          rt(j,3) = C(3,1)*rb(j,1) + C(3,2)*rb(j,2) + C(3,3)*rb(j,3) ! j1=3
+
+          ! Save radiances 
+          radiance_dn(j,jlev+1) = radiance_dn(j,jlev+1) + rt(j,1) + rt(j,2) + rt(j,3)
+        end do
+      end associate
+    else 
+      ! Solution to Schwarzschild equation
+      radiance_base = mat_x_vec(ng,transmittance(:,:,:,jlev),radiance_top) &
+          &        + weight * source_dn(:,:,jlev)
+      ! Overlap rules to obtain radiances at base of the layer above
+      radiance_top = singlemat_x_vec(ng,v_overlap(:,:,jlev+1),radiance_base)
+
+      ! Save radiances
+      radiance_dn(:,jlev+1) = radiance_dn(:,jlev+1) + sum(radiance_top,2)
+    end if 
+
   end do
 
   if (lhook) call dr_hook('tcrad:calc_radiance_dn_3d',1,hook_handle)

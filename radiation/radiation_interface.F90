@@ -535,7 +535,7 @@ contains
 #ifdef USE_TIMING
     ret =  gptlstart('tcrad_lw')
 #endif  
-          call solver_tcrad_lw(nlev,istartcol,iendcol, &
+          call solver_tcrad_lw(config%n_g_lw, nlev,istartcol,iendcol, &
                &  config, thermodynamics, cloud, & 
                &  od_lw, ssa_lw, g_lw, od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
                &  planck_hl, lw_emission, lw_albedo, flux)

@@ -255,9 +255,6 @@ subroutine calc_flux(ng_lw_in, nlev, surf_emission, surf_albedo, planck_hl, &
   is_cloud_free_layer(nlev+1) = .true.
   ! Compute wavelength-independent overlap matrices u_overlap and
   ! v_overlap
-#ifdef USE_TIMING
-    ret =  gptlstart('calc_overlap_matrices')
-#endif  
   ! call calc_overlap_matrices(nlev, &
   !      &  region_fracs, overlap_param, &
   !      &  u_overlap, v_overlap, &
@@ -270,9 +267,6 @@ subroutine calc_flux(ng_lw_in, nlev, surf_emission, surf_albedo, planck_hl, &
        &  0.5_jprb, &
        &  cloud_fraction_threshold, &
        &  cloud_cover)
-#ifdef USE_TIMING
-    ret =  gptlstop('calc_overlap_matrices')
-#endif 
   ! Average gas and cloud properties noting that: (1) region 1 is
   ! cloud-free so we copy over the gas optical depth; (2) gases only
   ! absorb so the single scattering albedo (ssa) of region is
@@ -282,18 +276,12 @@ subroutine calc_flux(ng_lw_in, nlev, surf_emission, surf_albedo, planck_hl, &
   ! regardless of the optical depth scaling (od_scaling) so we
   ! simply use the asymmetry_cloud variable when calculating
   ! reflectance and transmittance.
-#ifdef USE_TIMING
-    ret =  gptlstart('prepare_opt_props')
-#endif  
   od(:,1,:) = od_clear
   do jreg = 2,NREGION
     od(:,jreg,:) = od_clear + od_cloud*spread(od_scaling(jreg,:),1,ng)
     ssa(:,jreg,:) = ssa_cloud(:,:)*od_cloud(:,:) &
          &  * spread(od_scaling(jreg,:),1,ng) / od(:,jreg,:)
   end do
-#ifdef USE_TIMING
-    ret =  gptlstop('prepare_opt_props')
-#endif 
   ! ! Identify cloud-free layers
   ! is_cloud_free_layer(0) = .true.
   ! is_cloud_free_layer(1:nlev) = (region_fracs(1,:) == 1.0_jprb)

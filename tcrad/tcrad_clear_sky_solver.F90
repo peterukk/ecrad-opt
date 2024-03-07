@@ -25,7 +25,10 @@ contains
     use yomhook,  only           : lhook, dr_hook, jphook
     use tcrad_layer_solutions, only : calc_clear_sky_trans_source, &
          &  gauss_legendre, lw_diffusivity, MAX_GAUSS_LEGENDRE_POINTS
-
+#ifdef USE_TIMING
+    ! Timing library
+    use gptl,                  only: gptlstart, gptlstop
+#endif
     implicit none
 
     real(jprb) :: lw_mu
@@ -93,7 +96,9 @@ contains
 
     ! Loop index for stream
     integer(jpim) :: jstream
-
+#ifdef USE_TIMING
+    integer :: ret
+#endif
     real(jphook) :: hook_handle
 
     if (lhook) call dr_hook('tcrad:calc_clear_sky_flux',0,hook_handle)
@@ -149,9 +154,15 @@ contains
              &          * mu_list(1:n_angles_per_hem_local))
         ! Radiances are computed in pairs: up and down with same
         ! absolute zenith angle
+#ifdef USE_TIMING
+    ret =  gptlstart('calc_clear_sky_trans_source')
+#endif
         call calc_clear_sky_trans_source(nspec,nlev, mu_list(jstream), &
              &  planck_hl, od_clear, transmittance, source_dn=source_dn, &
              &  source_up=source_up)
+#ifdef USE_TIMING
+    ret =  gptlstop('calc_clear_sky_trans_source')
+#endif
         call calc_clear_sky_radiance_dn(nspec, nlev, &
              &  weight, &
              &  transmittance, source_dn, flux_dn)

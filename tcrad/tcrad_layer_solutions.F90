@@ -823,7 +823,7 @@ contains
          &  :: source_up, source_dn
 
     ! Working variables
-    real(jprb) :: secant, coeff
+    real(jprb) :: secant, coeff, coeff2, mu_over_od
    
     ! Loop indices for level and spectral interval
     integer(jpim) :: jlev, jg
@@ -834,41 +834,68 @@ contains
 
     secant = 1.0_jprb / mu
 
+    transmittance = exp(-od*secant)
+
     do jlev = 1,nlev
 
-      transmittance(:,jlev) = exp(-od(:,jlev)*secant)
-
-      if (present(source_up)) then
-        ! Compute upward source from layer top due to Planck emission
-        ! within the layer
+      if (present(source_up) .and. present(source_dn)) then
+        ! optimized version with only one loop having conditional; which is further implemented as a
+        ! postprocessing loop to vectorize the main computations
         do jg = 1,ng
-          if (od(jg,jlev) > OD_THRESH) then
-            coeff = (planck_hl(jg,jlev+1) - planck_hl(jg,jlev)) &
-                 &   * mu / od(jg,jlev)
-            source_up(jg,jlev) = coeff + planck_hl(jg,jlev) &
-                 - transmittance(jg,jlev) * (coeff + planck_hl(jg,jlev+1))
-          else
+          mu_over_od =  mu / od(jg,jlev)
+          coeff = (planck_hl(jg,jlev+1) - planck_hl(jg,jlev)) * mu_over_od
+          coeff2 = (planck_hl(jg,jlev) - planck_hl(jg,jlev+1)) * mu_over_od
+          ! Compute upward source from layer top and downward source from layer base
+          ! due to Planck emission within the layer
+          source_up(jg,jlev) = coeff + planck_hl(jg,jlev) &
+              - transmittance(jg,jlev) * (coeff + planck_hl(jg,jlev+1))
+          source_dn(jg,jlev) = coeff2 + planck_hl(jg,jlev+1) &
+              - transmittance(jg,jlev) * (coeff2 + planck_hl(jg,jlev))
+        end do 
+        
+        do jg = 1,ng
+          if (od(jg,jlev) < OD_THRESH) then
             source_up(jg,jlev) = od(jg,jlev) &
-                 &  * 0.5_jprb * (planck_hl(jg,jlev)+planck_hl(jg,jlev+1)) / mu
-          end if
+                &  * 0.5_jprb * (planck_hl(jg,jlev)+planck_hl(jg,jlev+1)) / mu
+            source_dn(jg,jlev) = source_up(jg,jlev)
+          end if 
         end do
-      end if
 
-      if (present(source_dn)) then
-        ! Compute downward source from layer base due to Planck emission
-        ! within the layer
-        do jg = 1,ng
-          if (od(jg,jlev) > OD_THRESH) then
-            coeff = (planck_hl(jg,jlev) - planck_hl(jg,jlev+1)) &
-                 &   * mu / od(jg,jlev)
-            source_dn(jg,jlev) = coeff + planck_hl(jg,jlev+1) &
-                 - transmittance(jg,jlev) * (coeff + planck_hl(jg,jlev))
-          else
-            source_dn(jg,jlev) = od(jg,jlev) &
-                 &  * 0.5_jprb * (planck_hl(jg,jlev)+planck_hl(jg,jlev+1)) / mu
-          end if
-        end do
-      end if
+      else
+
+        if (present(source_up)) then
+          ! Compute upward source from layer top due to Planck emission
+          ! within the layer
+          do jg = 1,ng
+            if (od(jg,jlev) > OD_THRESH) then
+              coeff = (planck_hl(jg,jlev+1) - planck_hl(jg,jlev)) &
+                  &   * mu / od(jg,jlev)
+              source_up(jg,jlev) = coeff + planck_hl(jg,jlev) &
+                  - transmittance(jg,jlev) * (coeff + planck_hl(jg,jlev+1))
+            else
+              source_up(jg,jlev) = od(jg,jlev) &
+                  &  * 0.5_jprb * (planck_hl(jg,jlev)+planck_hl(jg,jlev+1)) / mu
+            end if
+          end do
+        end if
+
+        if (present(source_dn)) then
+          ! Compute downward source from layer base due to Planck emission
+          ! within the layer
+          do jg = 1,ng
+            if (od(jg,jlev) > OD_THRESH) then
+              coeff = (planck_hl(jg,jlev) - planck_hl(jg,jlev+1)) &
+                  &   * mu / od(jg,jlev)
+              source_dn(jg,jlev) = coeff + planck_hl(jg,jlev+1) &
+                  - transmittance(jg,jlev) * (coeff + planck_hl(jg,jlev))
+            else
+              source_dn(jg,jlev) = od(jg,jlev) &
+                  &  * 0.5_jprb * (planck_hl(jg,jlev)+planck_hl(jg,jlev+1)) / mu
+            end if
+          end do
+        end if
+
+      end if 
 
     end do
 
@@ -876,7 +903,131 @@ contains
 
   end subroutine calc_clear_sky_trans_source
 
+  ! subroutine calc_clear_sky_trans_source_collapse(ng_lw_in, nlev, &
+  !      &  mu, planck_top, planck_bot, od, &
+  !      &  transmittance, source_up, source_dn)
+      
+  !   use yomhook,  only           : lhook, dr_hook, jphook
 
+  !   ! Inputs
+
+  !   ! Number of spectral intervals and levels
+  !   integer(jpim), intent(in) :: ng_lw_in, nlev
+
+  !   ! Cosine of the zenith angle (positive)
+  !   real(jprb) :: mu
+
+  !   ! Planck function integrated over each spectral interval at each
+  !   ! half-level, in W m-2 (i.e. the flux emitted by a horizontal
+  !   ! black-body surface)
+  !   real(jprb), intent(in), dimension(ng*nlev) :: planck_top, planck_bot
+
+  !   ! Optical depth in each layer
+  !   real(jprb), intent(in), dimension(ng*nlev) :: od
+  
+  !   ! Outputs
+
+  !   ! Layer transmittance at the requested zenith angle
+  !   real(jprb), intent(out), dimension(ng*nlev) :: transmittance
+
+  !   ! Source term up from the top of the layer or down from its base,
+  !   ! in Watts of power per square metre of the entire gridbox, so the
+  !   ! energy is scaled by the size of each region. Since the user may
+  !   ! only require a radiance up or down, these output arguments are
+  !   ! optional.
+  !   real(jprb), intent(out), dimension(ng*nlev), optional &
+  !        &  :: source_up, source_dn
+
+  !   ! Working variables
+  !   real(jprb) :: secant, coeff, coeff2, mu_over_od
+   
+  !   ! Loop indices for level and spectral interval
+  !   integer(jpim) :: jlev, jg
+
+  !   real(jphook) :: hook_handle
+
+  !   if (lhook) call dr_hook('tcrad:calc_clear_sky_trans_source',0,hook_handle)
+
+  !   secant = 1.0_jprb / mu
+
+  !   transmittance = exp(-od*secant)
+
+  !   if (present(source_up) .and. present(source_dn)) then
+  !     ! optimized version with only one loop having conditional; which is further implemented as a
+  !     ! postprocessing loop to vectorize the main computations
+  !     do jg = 1,ng*nlev
+  !       mu_over_od =  mu / od(jg)
+  !       coeff = (planck_bot(jg) - planck_top(jg)) * mu_over_od
+  !       coeff2 = (planck_top(jg) - planck_bot(jg)) * mu_over_od
+  !       ! Compute upward source from layer top and downward source from layer base
+  !       ! due to Planck emission within the layer
+  !       source_up(jg) = coeff + planck_top(jg) &
+  !           - transmittance(jg) * (coeff + planck_bot(jg))
+  !       source_dn(jg) = coeff2 + planck_bot(jg) &
+  !           - transmittance(jg) * (coeff2 + planck_top(jg))
+  !     end do 
+      
+  !     do jg = 1,ng*nlev
+  !       if (od(jg) < OD_THRESH) then
+  !         source_up(jg) = od(jg) &
+  !             &  * 0.5_jprb * (planck_top(jg)+planck_bot(jg)) / mu
+  !         source_dn(jg) = source_up(jg)
+  !       end if 
+  !     end do
+
+  !   else
+
+  !     if (present(source_up)) then
+  !       ! Compute upward source from layer top due to Planck emission
+  !       ! within the layer
+  !       do jg = 1,ng*nlev
+  !         ! if (od(jg) > OD_THRESH) then
+  !           coeff = (planck_bot(jg) - planck_top(jg)) &
+  !               &   * mu / od(jg)
+  !           source_up(jg) = coeff + planck_top(jg) &
+  !               - transmittance(jg) * (coeff + planck_bot(jg))
+  !         ! else
+  !         !   source_up(jg) = od(jg) &
+  !         !       &  * 0.5_jprb * (planck_top(jg)+planck_bot(jg)) / mu
+  !         ! end if
+  !       end do
+  !       do jg = 1,ng*nlev
+  !         if (od(jg) < OD_THRESH) then
+  !           source_up(jg) = od(jg) &
+  !               &  * 0.5_jprb * (planck_top(jg)+planck_bot(jg)) / mu
+  !         end if
+  !       end do
+  !     end if
+
+  !     if (present(source_dn)) then
+  !       ! Compute downward source from layer base due to Planck emission
+  !       ! within the layer
+  !       do jg = 1,ng*nlev
+  !         ! if (od(jg) > OD_THRESH) then
+  !           coeff = (planck_top(jg) - planck_bot(jg)) &
+  !               &   * mu / od(jg)
+  !           source_dn(jg) = coeff + planck_bot(jg) &
+  !               - transmittance(jg) * (coeff + planck_top(jg))
+  !         ! else
+  !         !   source_dn(jg) = od(jg) &
+  !         !       &  * 0.5_jprb * (planck_top(jg)+planck_bot(jg)) / mu
+  !         ! end if
+  !       end do
+  !       do jg = 1,ng*nlev
+  !         if (od(jg) < OD_THRESH) then
+  !           source_dn(jg) = od(jg) &
+  !               &  * 0.5_jprb * (planck_top(jg)+planck_bot(jg)) / mu
+  !         end if
+  !       end do
+  !     end if
+
+  !   end if 
+
+
+  !   if (lhook) call dr_hook('tcrad:calc_clear_sky_trans_source_collapse',1,hook_handle)
+
+  ! end subroutine calc_clear_sky_trans_source_collapse
+  
   !---------------------------------------------------------------------
   ! Calculate the transmittance of each layer and region along a path
   ! with consine of zenith angle "mu", as well as (optionally) the

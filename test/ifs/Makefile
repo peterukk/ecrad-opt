@@ -100,7 +100,7 @@ test_tcrad_3D:
 		sw_solver_name='"Tripleclouds"' lw_solver_name='"TCRAD"' \
 		do_3d_effects="true" \
 		overlap_scheme_name='"Exp-Ran"'
-	$(DRIVER) config_tcrad_3D.nam $(INPUT).nc $(INPUT)_tcrad_out.nc
+	$(DRIVER) config_tcrad_3D.nam $(INPUT).nc $(INPUT)_tcrad_3D_out.nc
 
 # "Cloudless" solver
 test_cloudless:
@@ -169,12 +169,24 @@ test_aerosol_averaging:
 	$(DRIVER) config_ecckd_band_saveaer.nam $(INPUT).nc $(INPUT)_ecckd_band_saveaer_out.nc
 	mv aerosol_optics.nc aerosol_optics_ecckd_band.nc
 
-# ecCKD gas optics with SPARTACUS solver (not currently correct)
+# ecCKD gas optics with SPARTACUS solver
 test_ecckd_spartacus:
 	$(CHANGENAM) $(CONFIG_ECCKD) config_ecckd_spartacus.nam \
 		sw_solver_name='"SPARTACUS"' lw_solver_name='"SPARTACUS"' \
 		do_3d_effects="true" 
 	$(DRIVER) config_ecckd_spartacus.nam $(INPUT).nc $(INPUT)_ecckd_spartacus_out.nc
+
+test_ecckd_tcrad:
+	$(CHANGENAM) $(CONFIG_ECCKD) config_ecckd_tcrad.nam \
+		sw_solver_name='"Tripleclouds"' lw_solver_name='"TCRAD"' \
+		overlap_scheme_name='"Exp-Ran"'
+	$(DRIVER) config_ecckd_tcrad.nam $(INPUT).nc $(INPUT)_ecckd_tcrad_out.nc
+
+test_ecckd_spartacus_tcrad:
+	$(CHANGENAM) $(CONFIG_ECCKD) test_ecckd_spartacus_tcrad.nam \
+		sw_solver_name='"SPARTACUS"' lw_solver_name='"TCRAD"' \
+		do_3d_effects="true" overlap_scheme_name='"Exp-Ran"' 
+	$(DRIVER) test_ecckd_spartacus_tcrad.nam $(INPUT).nc $(INPUT)_ecckd_tcrad_spartacus_out.nc
 
 # ecCKD gas optics with no aerosol
 test_ecckd_tc_noaer:
